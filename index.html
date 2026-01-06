@@ -3,8 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>הכנסות פלוס - ניהול עצמאי</title>
+    <title>הכנסות פלוס - ניהול משותף</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Firebase Libraries -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getFirestore, doc, setDoc, onSnapshot, collection, addDoc, query, where } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+
+        window.FirebaseSDK = { initializeApp, getFirestore, doc, setDoc, onSnapshot, collection, addDoc, getAuth, signInAnonymously, onAuthStateChanged };
+    </script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -13,18 +21,12 @@
     <style>
         body { font-family: 'Assistant', sans-serif; background-color: #f8fafc; }
         input[type="date"]::-webkit-calendar-picker-indicator {
-            background: transparent;
-            bottom: 0; color: transparent; cursor: pointer;
+            background: transparent; bottom: 0; color: transparent; cursor: pointer;
             height: auto; left: 0; position: absolute; right: 0; top: 0; width: auto;
         }
         .dir-ltr { direction: ltr; }
-        @keyframes chart-draw {
-            from { stroke-dasharray: 1000; stroke-dashoffset: 1000; }
-            to { stroke-dashoffset: 0; }
-        }
+        @keyframes chart-draw { from { stroke-dasharray: 1000; stroke-dashoffset: 1000; } to { stroke-dashoffset: 0; } }
         .animate-chart-draw { animation: chart-draw 2s ease-out forwards; }
-        .sync-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
-        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
     </style>
 </head>
 <body>
@@ -48,70 +50,61 @@
 
         const isWorkday = (year, month, day) => {
             const date = new Date(year, month, day);
-            const dayOfWeek = date.getDay(); // 0 = Sun, 5 = Fri, 6 = Sat
+            const dayOfWeek = date.getDay(); 
             return dayOfWeek !== 5 && dayOfWeek !== 6;
         };
 
         function App() {
+            const [user, setUser] = useState(null);
             const [view, setView] = useState('input');
             const [entries, setEntries] = useState([]);
-            const [target, setTarget] = useState(15000);
-            const [isSyncing, setIsSyncing] = useState(false);
+            const [settings, setSettings] = useState({ target: 15000, scriptUrl: '', sheetUrl: '' });
+            const [isSyncing, setIsSyncing] = useState(true);
             const [message, setMessage] = useState(null);
-            const [scriptUrl, setScriptUrl] = useState('');
-            const [sheetUrl, setSheetUrl] = useState('');
-            const [showClearConfirm, setShowClearConfirm] = useState(false);
 
             const [amount, setAmount] = useState('');
             const [method, setMethod] = useState('bit');
             const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
 
-            // פונקציית סנכרון לקריאה מהגיליון
-            const syncWithSheet = useCallback(async (url) => {
-                if (!url || !url.startsWith('http')) return;
-                setIsSyncing(true);
-                try {
-                    const response = await fetch(url);
-                    const data = await response.json();
-                    if (Array.isArray(data)) {
-                        // מעדכן את ה-State המקומי עם המידע העדכני מהגיליון
-                        const formattedData = data.map(item => ({
-                            ...item,
-                            amount: Number(item.amount)
-                        })).sort((a, b) => new Date(b.date) - new Date(a.date));
-                        
-                        setEntries(formattedData);
-                        localStorage.setItem('income_entries', JSON.stringify(formattedData));
-                    }
-                } catch (err) {
-                    console.error("Sync error:", err);
-                } finally {
-                    setIsSyncing(false);
-                }
+            // --- Firebase Setup ---
+            useEffect(() => {
+                const initFirebase = async () => {
+                    const { initializeApp, getFirestore, getAuth, signInAnonymously, onAuthStateChanged, doc, onSnapshot, collection } = window.FirebaseSDK;
+                    
+                    const firebaseConfig = JSON.parse(__firebase_config);
+                    const app = initializeApp(firebaseConfig);
+                    const db = getFirestore(app);
+                    const auth = getAuth(app);
+                    const appId = typeof __app_id !== 'undefined' ? __app_id : 'income-tracker-shared';
+
+                    // 1. Auth First
+                    await signInAnonymously(auth);
+                    
+                    onAuthStateChanged(auth, (currentUser) => {
+                        if (currentUser) {
+                            setUser(currentUser);
+                            
+                            // 2. Listen to Settings (Shared Cloud Storage)
+                            const settingsRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'config');
+                            onSnapshot(settingsRef, (docSnap) => {
+                                if (docSnap.exists()) {
+                                    setSettings(docSnap.data());
+                                }
+                                setIsSyncing(false);
+                            }, (err) => { console.error("Settings sync error", err); setIsSyncing(false); });
+
+                            // 3. Listen to Entries (Shared Cloud Storage)
+                            const entriesRef = collection(db, 'artifacts', appId, 'public', 'data', 'entries');
+                            onSnapshot(entriesRef, (snapshot) => {
+                                const data = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+                                setEntries(data.sort((a, b) => new Date(b.date) - new Date(a.date)));
+                            }, (err) => console.error("Entries sync error", err));
+                        }
+                    });
+                };
+
+                if (window.FirebaseSDK) initFirebase();
             }, []);
-
-            // טעינה ראשונית
-            useEffect(() => {
-                const savedTarget = localStorage.getItem('income_target');
-                const savedUrl = localStorage.getItem('income_script_url');
-                const savedSheet = localStorage.getItem('income_sheet_url');
-                const savedEntries = localStorage.getItem('income_entries');
-                
-                if (savedTarget) setTarget(Number(savedTarget));
-                if (savedUrl) setScriptUrl(savedUrl);
-                if (savedSheet) setSheetUrl(savedSheet);
-                if (savedEntries) setEntries(JSON.parse(savedEntries));
-
-                // סנכרון אוטומטי בטעינה אם יש כתובת סקריפט
-                if (savedUrl) syncWithSheet(savedUrl);
-            }, [syncWithSheet]);
-
-            // שמירת הגדרות בשינוי
-            useEffect(() => {
-                localStorage.setItem('income_target', target.toString());
-                localStorage.setItem('income_script_url', scriptUrl);
-                localStorage.setItem('income_sheet_url', sheetUrl);
-            }, [target, scriptUrl, sheetUrl]);
 
             const stats = useMemo(() => {
                 const now = new Date();
@@ -135,242 +128,214 @@
                 });
 
                 const totalActual = monthlyEntries.reduce((sum, e) => sum + Number(e.amount), 0);
-                const targetPerWorkday = target / (totalWorkdaysInMonth || 1);
+                const safeTarget = Number(settings.target) || 15000;
+                const targetPerWorkday = safeTarget / (totalWorkdaysInMonth || 1);
                 const targetToDate = targetPerWorkday * passedWorkdays;
                 const projection = passedWorkdays > 0 ? (totalActual / passedWorkdays) * totalWorkdaysInMonth : 0;
                 const diff = totalActual - targetToDate;
 
-                const dailyData = [];
-                let cumulativeActual = 0;
-                let cumulativeTarget = 0;
-                for (let d = 1; d <= daysInMonth; d++) {
-                    const dayEntries = monthlyEntries.filter(e => new Date(e.date).getDate() === d);
-                    cumulativeActual += dayEntries.reduce((sum, e) => sum + Number(e.amount), 0);
-                    if (isWorkday(currentYear, currentMonth, d)) cumulativeTarget += targetPerWorkday;
-                    dailyData.push({ day: d, actual: d <= dayOfMonth ? cumulativeActual : null, target: cumulativeTarget });
-                }
-
-                return { totalActual, targetToDate, projection, diff, percentage: (totalActual / target) * 100, totalWorkdaysInMonth, passedWorkdays, dailyData, daysInMonth, dayOfMonth };
-            }, [entries, target]);
+                return { totalActual, targetToDate, projection, diff, percentage: (totalActual / safeTarget) * 100, passedWorkdays, totalWorkdaysInMonth, daysInMonth, dayOfMonth };
+            }, [entries, settings]);
 
             const handleSaveEntry = async (e) => {
                 e.preventDefault();
-                if (!amount) return;
+                if (!amount || !user) return;
 
                 const newEntry = {
-                    id: Date.now(),
                     amount: Number(amount),
                     method,
                     date,
-                    timestamp: new Date().toLocaleString('he-IL')
+                    timestamp: new Date().toISOString(),
+                    createdBy: user.uid
                 };
 
-                setIsSyncing(true);
-                // עדכון מקומי מהיר
-                const updatedEntries = [newEntry, ...entries];
-                setEntries(updatedEntries);
-                localStorage.setItem('income_entries', JSON.stringify(updatedEntries));
+                const { getFirestore, collection, addDoc } = window.FirebaseSDK;
+                const db = getFirestore();
+                const appId = typeof __app_id !== 'undefined' ? __app_id : 'income-tracker-shared';
 
-                if (scriptUrl) {
-                    try {
-                        await fetch(scriptUrl, { method: 'POST', mode: 'no-cors', body: JSON.stringify(newEntry) });
-                        // לאחר שמירה מוצלחת, נסנכרן שוב כדי לוודא התאמה מלאה
-                        setTimeout(() => syncWithSheet(scriptUrl), 1000);
-                    } catch (err) { console.error(err); }
-                }
+                try {
+                    // 1. שמירה לענן (Firestore) - זה יסנכרן את כולם
+                    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'entries'), newEntry);
 
-                setAmount('');
-                setMessage({ text: 'ההכנסה נשמרה!' });
-                setIsSyncing(false);
-                setTimeout(() => setMessage(null), 3000);
+                    // 2. סנכרון ל-Sheets (אם הוגדר)
+                    if (settings.scriptUrl) {
+                        fetch(settings.scriptUrl, { method: 'POST', mode: 'no-cors', body: JSON.stringify(newEntry) });
+                    }
+
+                    setAmount('');
+                    setMessage({ text: 'נשמר בענן!' });
+                    setTimeout(() => setMessage(null), 3000);
+                } catch (err) { console.error(err); }
             };
 
-            const clearAllEntries = () => {
-                setEntries([]);
-                localStorage.setItem('income_entries', JSON.stringify([]));
-                setShowClearConfirm(false);
-                setMessage({ text: 'ההיסטוריה המקומית נמחקה!' });
-                setTimeout(() => setMessage(null), 3000);
+            const handleUpdateSettings = async (field, value) => {
+                const newSettings = { ...settings, [field]: value };
+                setSettings(newSettings);
+                
+                const { getFirestore, doc, setDoc } = window.FirebaseSDK;
+                const db = getFirestore();
+                const appId = typeof __app_id !== 'undefined' ? __app_id : 'income-tracker-shared';
+                
+                try {
+                    // שמירת הגדרות בענן - כל המכשירים יתעדכנו
+                    await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'config'), newSettings, { merge: true });
+                } catch (err) { console.error(err); }
             };
+
+            if (isSyncing) return (
+                <div className="h-screen flex items-center justify-center bg-slate-50">
+                    <div className="text-center animate-pulse">
+                        <Icon name="cloud-lightning" className="text-blue-500 mx-auto mb-2" size={48} />
+                        <p className="font-bold text-slate-400">מתחבר לענן משותף...</p>
+                    </div>
+                </div>
+            );
 
             return (
                 <div className="min-h-screen pb-24">
                     <header className="bg-white p-6 border-b sticky top-0 z-10 shadow-sm flex justify-between items-center max-w-md mx-auto">
                         <div className="flex items-center gap-2">
-                            <div className={isSyncing ? "text-blue-500 sync-pulse" : "text-gray-300"}>
-                                <Icon name="cloud-refresh" size={18} />
-                            </div>
-                            <div>
-                                <h1 className="text-xl font-black">הכנסות פלוס</h1>
-                                <p className="text-gray-400 text-[10px]">מסונכרן עם הגיליון</p>
-                            </div>
+                            <Icon name="cloud" size={18} className="text-emerald-500" />
+                            <h1 className="text-xl font-black">הכנסות פלוס</h1>
                         </div>
-                        <div className="flex gap-2">
-                             <button onClick={() => syncWithSheet(scriptUrl)} className="text-gray-400 p-2"><Icon name="refresh-cw" size={20} className={isSyncing ? "animate-spin" : ""} /></button>
-                             <button onClick={() => setView('settings')} className="text-gray-400 p-2"><Icon name="settings" size={20} /></button>
-                        </div>
+                        <button onClick={() => setView('settings')} className="text-gray-400 p-2"><Icon name="settings" size={22} /></button>
                     </header>
 
                     <main className="max-w-md mx-auto p-4 space-y-6 text-right">
                         {message && (
-                            <div className="bg-green-500 text-white p-3 rounded-xl text-center font-bold text-sm shadow-md animate-in slide-in-from-top duration-300">
-                                {message.text}
+                            <div className="bg-emerald-600 text-white p-3 rounded-xl text-center font-bold text-sm shadow-lg animate-in slide-in-from-top duration-300">
+                                {String(message.text)}
                             </div>
                         )}
 
                         {view === 'input' && (
                             <div className="space-y-6">
-                                <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-                                    <form onSubmit={handleSaveEntry} className="space-y-4">
-                                        <div className="space-y-1 text-center">
-                                            <label className="text-[10px] font-bold text-gray-400 uppercase">סכום הכנסה</label>
+                                <div className="bg-white p-6 rounded-[2rem] shadow-xl shadow-slate-200/50 border border-white">
+                                    <form onSubmit={handleSaveEntry} className="space-y-6">
+                                        <div className="text-center">
+                                            <label className="text-[10px] font-black text-slate-300 uppercase tracking-widest">סכום הכנסה</label>
                                             <input 
                                                 type="number" inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value)}
-                                                placeholder="₪0.00" className="w-full text-5xl font-black p-4 bg-transparent text-center outline-none focus:ring-0 placeholder-gray-100" required
+                                                placeholder="₪0" className="w-full text-6xl font-black p-2 bg-transparent text-center outline-none placeholder-slate-100" required
                                             />
                                         </div>
                                         <div className="grid grid-cols-2 gap-2">
                                             {PAYMENT_METHODS.map(m => (
-                                                <button key={m.id} type="button" onClick={() => setMethod(m.id)} className={`p-3 rounded-xl text-sm font-bold transition-all ${method === m.id ? 'bg-blue-600 text-white shadow-md' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
-                                                    {m.label}
+                                                <button key={m.id} type="button" onClick={() => setMethod(m.id)} className={`p-4 rounded-2xl text-xs font-black transition-all ${method === m.id ? 'bg-blue-600 text-white shadow-lg' : 'bg-slate-50 text-slate-400'}`}>
+                                                    {String(m.label)}
                                                 </button>
                                             ))}
                                         </div>
                                         <div className="relative">
-                                            <input type="date" value={date} onChange={e => setDate(e.target.value)} className="w-full p-4 bg-gray-50 rounded-xl text-right pr-12 font-bold text-gray-700 outline-none" />
-                                            <div className="absolute right-4 top-4 text-gray-400"><Icon name="calendar" size={20} /></div>
+                                            <input type="date" value={date} onChange={e => setDate(e.target.value)} className="w-full p-4 bg-slate-50 rounded-2xl text-right pr-12 font-bold text-slate-600 outline-none" />
+                                            <Icon name="calendar" className="absolute right-4 top-4 text-slate-300" size={20} />
                                         </div>
-                                        <button disabled={isSyncing} className="w-full bg-blue-600 text-white font-bold py-4 rounded-xl shadow-lg active:scale-95 transition-all flex justify-center items-center gap-2">
-                                            {isSyncing ? <Icon name="loader" className="animate-spin" size={20} /> : <><Icon name="save" size={20} /> שמור הכנסה</>}
+                                        <button className="w-full bg-slate-900 text-white font-black py-5 rounded-2xl shadow-xl active:scale-95 transition-all flex justify-center items-center gap-2">
+                                            <Icon name="save" size={20} /> שמור הכנסה משותפת
                                         </button>
                                     </form>
                                 </div>
-                                
                                 <div className="grid grid-cols-2 gap-3">
-                                    <div className="bg-green-50 p-4 rounded-2xl border border-green-100 text-center">
-                                        <p className="text-green-600 text-[10px] font-bold uppercase tracking-widest">סה"כ החודש</p>
-                                        <p className="text-green-700 text-2xl font-black">₪{stats.totalActual.toLocaleString()}</p>
+                                    <div className="bg-emerald-50 p-5 rounded-3xl text-center border border-emerald-100">
+                                        <p className="text-emerald-600 text-[10px] font-black uppercase">סה"כ החודש</p>
+                                        <p className="text-emerald-700 text-2xl font-black">₪{Number(stats.totalActual).toLocaleString()}</p>
                                     </div>
-                                    <div className="bg-blue-50 p-4 rounded-2xl border border-blue-100 text-center">
-                                        <p className="text-blue-600 text-[10px] font-bold uppercase tracking-widest text-nowrap">צפי סוף חודש</p>
-                                        <p className="text-blue-700 text-2xl font-black">₪{Math.round(stats.projection).toLocaleString()}</p>
+                                    <div className="bg-blue-50 p-5 rounded-3xl text-center border border-blue-100">
+                                        <p className="text-blue-600 text-[10px] font-black uppercase">צפי לסוף חודש</p>
+                                        <p className="text-blue-700 text-2xl font-black">₪{Math.round(Number(stats.projection)).toLocaleString()}</p>
                                     </div>
                                 </div>
                             </div>
                         )}
 
                         {view === 'dashboard' && (
-                            <div className="space-y-6">
-                                <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-                                    <div className={`p-5 rounded-xl mb-6 ${stats.diff >= 0 ? 'bg-green-50 text-green-700 border-green-100' : 'bg-red-50 text-red-700 border-red-100'} border`}>
-                                        <p className="text-xs font-bold uppercase tracking-wider">ביצוע מול יעד נוכחי</p>
-                                        <p className="text-3xl font-black mt-1 leading-none">{stats.diff >= 0 ? '+' : ''}₪{Math.round(Math.abs(stats.diff)).toLocaleString()}</p>
-                                        <p className="text-[10px] font-bold opacity-80 mt-3 flex items-center gap-1">
-                                            <Icon name="clock" size={12} />
-                                            עברו {stats.passedWorkdays} מתוך {stats.totalWorkdaysInMonth} ימי עבודה
-                                        </p>
+                            <div className="space-y-6 animate-in fade-in duration-500">
+                                <div className="bg-white p-6 rounded-[2rem] shadow-lg border border-slate-50">
+                                    <div className={`p-5 rounded-2xl mb-6 ${stats.diff >= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'} border`}>
+                                        <p className="text-[10px] font-black uppercase tracking-widest opacity-60">ביצוע מול יעד נוכחי</p>
+                                        <p className="text-4xl font-black mt-1 leading-none">{stats.diff >= 0 ? '+' : ''}₪{Math.round(Math.abs(stats.diff)).toLocaleString()}</p>
+                                        <p className="text-[10px] font-bold mt-3">יום עבודה {Number(stats.passedWorkdays)} מתוך {Number(stats.totalWorkdaysInMonth)}</p>
                                     </div>
-                                    
-                                    <div className="space-y-2 mb-6">
-                                        <div className="flex justify-between text-[10px] font-bold text-gray-400">
-                                            <span>יעד חודשי: ₪{target.toLocaleString()}</span>
-                                            <span>{Math.round(stats.percentage)}%</span>
+                                    <div className="space-y-2">
+                                        <div className="flex justify-between text-[10px] font-black text-slate-400">
+                                            <span>התקדמות יעד</span>
+                                            <span>{Math.round(Number(stats.percentage))}%</span>
                                         </div>
-                                        <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
-                                            <div style={{width: `${Math.min(stats.percentage, 100)}%`}} className="h-full bg-blue-500 transition-all duration-1000 shadow-sm"></div>
+                                        <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                                            <div style={{width: `${Math.min(stats.percentage, 100)}%`}} className="h-full bg-blue-500 transition-all duration-1000"></div>
                                         </div>
-                                    </div>
-
-                                    <div className="bg-gray-50 rounded-xl p-4 overflow-hidden border border-gray-100">
-                                        <p className="text-[10px] font-bold text-gray-400 mb-4 uppercase text-right">גרף התקדמות</p>
-                                        <svg viewBox="0 0 300 150" className="w-full overflow-visible">
-                                            <path d={`M 0 150 L 300 0`} fill="none" stroke="#cbd5e1" strokeWidth="1" strokeDasharray="4 2" />
-                                            <path 
-                                                d={`M 0 150 L ${stats.dailyData.filter(d => d.actual !== null).map(d => `${(d.day/stats.daysInMonth)*300},${150 - (d.actual/Math.max(target, stats.totalActual || 1)*150)}`).join(' L ')}`} 
-                                                fill="none" stroke="#3b82f6" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" 
-                                                className="animate-chart-draw"
-                                            />
-                                        </svg>
                                     </div>
                                 </div>
-
-                                <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-                                    <div className="flex justify-between items-center mb-4">
-                                        {!showClearConfirm ? (
-                                            <button onClick={() => setShowClearConfirm(true)} className="text-gray-300 hover:text-red-500 transition-colors"><Icon name="trash-2" size={18} /></button>
-                                        ) : (
-                                            <div className="flex items-center gap-2 animate-in fade-in slide-in-from-left-2 duration-300">
-                                                <span className="text-[10px] font-bold text-red-500">למחוק מקומית?</span>
-                                                <button onClick={clearAllEntries} className="bg-red-500 text-white text-[9px] px-2 py-1 rounded font-bold">כן</button>
-                                                <button onClick={() => setShowClearConfirm(false)} className="bg-gray-200 text-gray-600 text-[9px] px-2 py-1 rounded font-bold">ביטול</button>
-                                            </div>
-                                        )}
-                                        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest">פעולות אחרונות</h3>
-                                    </div>
+                                <div className="bg-white p-6 rounded-[2rem] shadow-lg border border-slate-50">
+                                    <h3 className="font-black text-slate-800 mb-4 text-xs uppercase tracking-widest">פעולות אחרונות בענן</h3>
                                     <div className="space-y-3">
-                                        {entries.length === 0 ? (
-                                            <p className="text-center text-gray-300 text-xs py-4 italic">אין פעולות להצגה (נסה לסנכרן מהענן)</p>
-                                        ) : (
-                                            entries.slice(0, 10).map(e => (
-                                                <div key={e.id} className="flex justify-between items-center p-3 bg-gray-50 rounded-xl border border-gray-100">
-                                                    <div className="flex items-center gap-3">
-                                                        <div className={`w-2 h-2 rounded-full ${PAYMENT_METHODS.find(m => m.id === e.method)?.color || 'bg-gray-300'}`}></div>
-                                                        <div>
-                                                            <p className="text-sm font-black">₪{Number(e.amount).toLocaleString()}</p>
-                                                            <p className="text-[10px] text-gray-400">{e.date}</p>
-                                                        </div>
+                                        {entries.slice(0, 10).map(e => (
+                                            <div key={e.id} className="flex justify-between items-center p-4 bg-slate-50 rounded-2xl border border-white">
+                                                <div className="flex items-center gap-3">
+                                                    <div className={`w-2.5 h-2.5 rounded-full ${PAYMENT_METHODS.find(m => m.id === e.method)?.color || 'bg-slate-300'}`}></div>
+                                                    <div>
+                                                        <p className="text-base font-black">₪{Number(e.amount).toLocaleString()}</p>
+                                                        <p className="text-[10px] font-bold text-slate-400 uppercase">{String(e.date)}</p>
                                                     </div>
-                                                    <span className="text-[9px] font-bold bg-white px-2 py-1 rounded-md border text-gray-500">{PAYMENT_METHODS.find(m => m.id === e.method)?.label}</span>
                                                 </div>
-                                            ))
-                                        )}
+                                                <span className="text-[9px] font-black bg-white px-3 py-1 rounded-full border text-slate-500 shadow-sm">{PAYMENT_METHODS.find(m => m.id === e.method)?.label}</span>
+                                            </div>
+                                        ))}
                                     </div>
                                 </div>
                             </div>
                         )}
 
                         {view === 'settings' && (
-                            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 space-y-6 animate-in slide-in-from-right duration-300">
-                                <h3 className="font-bold border-b pb-2">הגדרות מערכת</h3>
-                                <div>
-                                    <label className="block text-sm font-bold text-gray-500 mb-2">יעד הכנסה חודשי</label>
-                                    <input type="number" value={target} onChange={e => setTarget(Number(e.target.value))} className="w-full p-4 bg-gray-50 rounded-xl font-bold text-xl text-center border focus:ring-2 focus:ring-blue-500 outline-none" />
+                            <div className="bg-white p-8 rounded-[2rem] shadow-xl border border-white space-y-8 animate-in slide-in-from-right-8 duration-500">
+                                <h3 className="font-black border-b pb-4 text-slate-800">הגדרות ענן משותפות</h3>
+                                <div className="space-y-6">
+                                    <div>
+                                        <label className="block text-xs font-black text-slate-400 mb-2 uppercase tracking-widest">יעד הכנסה חודשי</label>
+                                        <input 
+                                            type="number" value={settings.target} 
+                                            onChange={e => handleUpdateSettings('target', Number(e.target.value))} 
+                                            className="w-full p-4 bg-slate-50 rounded-2xl font-black text-2xl text-center outline-none focus:ring-2 focus:ring-blue-500" 
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-black text-slate-400 mb-2 uppercase tracking-widest">Google Script URL (סנכרון)</label>
+                                        <input 
+                                            type="text" value={String(settings.scriptUrl)} 
+                                            onChange={e => handleUpdateSettings('scriptUrl', e.target.value)} 
+                                            className="w-full p-4 bg-slate-50 rounded-2xl text-[10px] dir-ltr border-none outline-none font-mono" 
+                                            placeholder="https://script.google.com/..." 
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-black text-slate-400 mb-2 uppercase tracking-widest">Google Sheet URL (צפייה)</label>
+                                        <input 
+                                            type="text" value={String(settings.sheetUrl)} 
+                                            onChange={e => handleUpdateSettings('sheetUrl', e.target.value)} 
+                                            className="w-full p-4 bg-slate-50 rounded-2xl text-[10px] dir-ltr border-none outline-none font-mono" 
+                                            placeholder="https://docs.google.com/spreadsheets/..." 
+                                        />
+                                    </div>
                                 </div>
-                                <div>
-                                    <label className="block text-sm font-bold text-gray-500 mb-2">כתובת Google Script (סנכרון)</label>
-                                    <input type="text" value={scriptUrl} onChange={e => setScriptUrl(e.target.value)} className="w-full p-3 bg-gray-50 rounded-lg text-xs dir-ltr border font-mono outline-none focus:ring-2 focus:ring-blue-500" placeholder="https://script.google.com/..." />
-                                    <p className="text-[9px] text-gray-400 mt-1">הכנס את ה-Web App URL שקיבלת מה-Deployment.</p>
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-bold text-gray-500 mb-2">כתובת הגיליון (Table View)</label>
-                                    <input type="text" value={sheetUrl} onChange={e => setSheetUrl(e.target.value)} className="w-full p-3 bg-gray-50 rounded-lg text-xs dir-ltr border font-mono outline-none" placeholder="https://docs.google.com/spreadsheets/..." />
-                                </div>
-                                <button onClick={() => setView('input')} className="w-full bg-gray-900 text-white font-bold py-4 rounded-xl shadow-md active:scale-95 transition-all">סיום וחזרה</button>
+                                <button onClick={() => setView('input')} className="w-full bg-slate-900 text-white font-black py-4 rounded-2xl shadow-lg">חזרה למסך הראשי</button>
                             </div>
                         )}
                     </main>
 
-                    <nav className="fixed bottom-0 left-0 right-0 bg-white border-t p-4 flex justify-around max-w-md mx-auto shadow-[0_-5px_15px_rgba(0,0,0,0.05)] rounded-t-3xl z-20">
-                        <button onClick={() => setView('input')} className={`flex flex-col items-center gap-1 transition-all ${view === 'input' ? 'text-blue-600 scale-110 font-bold' : 'text-gray-400'}`}>
-                            <Icon name="plus-circle" size={24} />
-                            <p className="text-[10px]">הזנה</p>
+                    <nav className="fixed bottom-0 left-0 right-0 bg-white/80 backdrop-blur-xl border-t p-4 flex justify-around max-w-md mx-auto shadow-2xl rounded-t-[2.5rem] z-20">
+                        <button onClick={() => setView('input')} className={`flex flex-col items-center gap-1 transition-all ${view === 'input' ? 'text-blue-600 scale-110 font-black' : 'text-slate-300'}`}>
+                            <Icon name="plus-circle" size={26} strokeWidth={3} />
+                            <p className="text-[10px] uppercase tracking-tighter">הזנה</p>
                         </button>
-                        
-                        <button onClick={() => setView('dashboard')} className={`flex flex-col items-center gap-1 transition-all ${view === 'dashboard' ? 'text-blue-600 scale-110 font-bold' : 'text-gray-400'}`}>
-                            <Icon name="bar-chart-3" size={24} />
-                            <p className="text-[10px]">ניתוח</p>
+                        <button onClick={() => setView('dashboard')} className={`flex flex-col items-center gap-1 transition-all ${view === 'dashboard' ? 'text-blue-600 scale-110 font-black' : 'text-slate-300'}`}>
+                            <Icon name="layout-dashboard" size={26} />
+                            <p className="text-[10px] uppercase tracking-tighter">ניתוח</p>
                         </button>
-
-                        {sheetUrl ? (
-                            <a href={sheetUrl} target="_blank" rel="noopener noreferrer" className="flex flex-col items-center gap-1 text-gray-400 hover:text-green-600 transition-all">
-                                <Icon name="table" size={24} />
-                                <p className="text-[10px] font-bold">טבלה</p>
+                        {settings.sheetUrl && (
+                            <a href={String(settings.sheetUrl)} target="_blank" rel="noopener noreferrer" className="flex flex-col items-center gap-1 text-slate-300 hover:text-emerald-500">
+                                <Icon name="table" size={26} />
+                                <p className="text-[10px] uppercase tracking-tighter text-center">טבלה</p>
                             </a>
-                        ) : (
-                            <button onClick={() => setView('settings')} className="flex flex-col items-center gap-1 text-gray-200">
-                                <Icon name="table" size={24} />
-                                <p className="text-[10px] font-bold">טבלה</p>
-                            </button>
                         )}
                     </nav>
                 </div>
