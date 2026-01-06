@@ -7,8 +7,8 @@ window.APP_CONFIG = {
     target: 30000,
 
     // ה-Web App URL שקיבלת מה-Google Apps Script
-    scriptUrl: "הדבק_כאן_את_הלינק_של_הסקריפט",
+    scriptUrl: "https://script.google.com/macros/s/AKfycbyIprpG_h9jXBoRRL6ePgG-4XEUBBYHnl7wPPsb5nM0NrQ8LguhYzjRgOrL5RwoaPH3mA/exec",
 
     // הלינק הישיר לגיליון ה-Google Sheets (לצפייה בטבלה)
-    sheetUrl: "הדבק_כאן_את_הלינק_של_הגיליון"
+    sheetUrl: "https://docs.google.com/spreadsheets/d/18k9uV0DymQ2TZs21MM5NEJGcbTiBprGi3tLAmmQ-ooE/edit?gid=0#gid=0"
 };
