@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="he" dir="rtl">
 <head>
@@ -32,9 +31,13 @@
     <script type="text/babel">
         const { useState, useEffect, useMemo } = React;
 
-        // Icons Mockup (since we use Lucide via CDN)
+        // רכיב אייקונים חסין
         const Icon = ({ name, size = 24, className = "" }) => {
-            useEffect(() => { lucide.createIcons(); }, []);
+            useEffect(() => { 
+                if (window.lucide) {
+                    window.lucide.createIcons();
+                }
+            }, [name]);
             return <i data-lucide={name} style={{ width: size, height: size }} className={className}></i>;
         };
 
@@ -59,25 +62,31 @@
             const [loading, setLoading] = useState(false);
             const [message, setMessage] = useState(null);
             const [scriptUrl, setScriptUrl] = useState('');
+            const [sheetUrl, setSheetUrl] = useState('');
 
             const [amount, setAmount] = useState('');
             const [method, setMethod] = useState('bit');
             const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
 
+            // טעינת נתונים שמורים
             useEffect(() => {
                 const savedEntries = localStorage.getItem('income_entries');
                 const savedTarget = localStorage.getItem('income_target');
                 const savedUrl = localStorage.getItem('income_script_url');
+                const savedSheet = localStorage.getItem('income_sheet_url');
                 if (savedEntries) setEntries(JSON.parse(savedEntries));
                 if (savedTarget) setTarget(Number(savedTarget));
                 if (savedUrl) setScriptUrl(savedUrl);
+                if (savedSheet) setSheetUrl(savedSheet);
             }, []);
 
+            // שמירת נתונים בכל שינוי
             useEffect(() => {
                 localStorage.setItem('income_entries', JSON.stringify(entries));
                 localStorage.setItem('income_target', target.toString());
                 localStorage.setItem('income_script_url', scriptUrl);
-            }, [entries, target, scriptUrl]);
+                localStorage.setItem('income_sheet_url', sheetUrl);
+            }, [entries, target, scriptUrl, sheetUrl]);
 
             const stats = useMemo(() => {
                 const now = new Date();
@@ -141,7 +150,7 @@
                 setTimeout(() => {
                     setEntries([newEntry, ...entries]);
                     setAmount('');
-                    setMessage({ text: 'נשמר בהצלחה!' });
+                    setMessage({ text: 'ההכנסה נשמרה!' });
                     setLoading(false);
                     setTimeout(() => setMessage(null), 3000);
                 }, 500);
@@ -152,45 +161,56 @@
                     <header className="bg-white p-6 border-b sticky top-0 z-10 shadow-sm flex justify-between items-center max-w-md mx-auto">
                         <div>
                             <h1 className="text-xl font-black">הכנסות פלוס</h1>
-                            <p className="text-gray-400 text-[10px]">ניהול עצמאי מחובר ל-Sheets</p>
+                            <p className="text-gray-400 text-[10px]">מעקב פיננסי עצמאי</p>
                         </div>
-                        <button onClick={() => setView('settings')} className="text-gray-400"><Icon name="settings" /></button>
+                        <button onClick={() => setView('settings')} className="text-gray-400">
+                            <Icon name="settings" size={24} />
+                        </button>
                     </header>
 
-                    <main className="max-w-md mx-auto p-4 space-y-6">
-                        {message && <div className="bg-green-500 text-white p-3 rounded-xl text-center font-bold text-sm">{message.text}</div>}
+                    <main className="max-w-md mx-auto p-4 space-y-6 text-right">
+                        {message && (
+                            <div className="bg-green-500 text-white p-3 rounded-xl text-center font-bold text-sm shadow-md animate-in slide-in-from-top duration-300">
+                                {message.text}
+                            </div>
+                        )}
 
                         {view === 'input' && (
                             <div className="space-y-6">
                                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
                                     <form onSubmit={handleSaveEntry} className="space-y-4">
-                                        <input 
-                                            type="number" inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value)}
-                                            placeholder="₪0.00" className="w-full text-4xl font-bold p-4 bg-gray-50 rounded-xl text-center outline-none focus:ring-2 focus:ring-blue-500" required
-                                        />
+                                        <div className="space-y-1">
+                                            <label className="text-[10px] font-bold text-gray-400 mr-1 uppercase">סכום הכנסה</label>
+                                            <input 
+                                                type="number" inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value)}
+                                                placeholder="₪0.00" className="w-full text-4xl font-bold p-4 bg-gray-50 rounded-xl text-center outline-none focus:ring-2 focus:ring-blue-500" required
+                                            />
+                                        </div>
                                         <div className="grid grid-cols-2 gap-2">
                                             {PAYMENT_METHODS.map(m => (
-                                                <button key={m.id} type="button" onClick={() => setMethod(m.id)} className={`p-3 rounded-xl text-sm font-bold ${method === m.id ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'}`}>
+                                                <button key={m.id} type="button" onClick={() => setMethod(m.id)} className={`p-3 rounded-xl text-sm font-bold transition-all ${method === m.id ? 'bg-blue-600 text-white shadow-md' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
                                                     {m.label}
                                                 </button>
                                             ))}
                                         </div>
                                         <div className="relative">
-                                            <input type="date" value={date} onChange={e => setDate(e.target.value)} className="w-full p-4 bg-gray-50 rounded-xl text-right pr-12" />
-                                            <Icon name="calendar" className="absolute right-4 top-4 text-gray-400" size={20} />
+                                            <input type="date" value={date} onChange={e => setDate(e.target.value)} className="w-full p-4 bg-gray-50 rounded-xl text-right pr-12 font-bold text-gray-700" />
+                                            <div className="absolute right-4 top-4 text-gray-400">
+                                                <Icon name="calendar" size={20} />
+                                            </div>
                                         </div>
-                                        <button disabled={loading} className="w-full bg-blue-600 text-white font-bold py-4 rounded-xl shadow-lg active:scale-95 transition-transform flex justify-center items-center gap-2">
-                                            {loading ? "שומר..." : <><Icon name="save" size={20} /> שמור הכנסה</>}
+                                        <button disabled={loading} className="w-full bg-blue-600 text-white font-bold py-4 rounded-xl shadow-lg active:scale-95 transition-all flex justify-center items-center gap-2">
+                                            {loading ? <Icon name="loader" className="animate-spin" size={20} /> : <><Icon name="save" size={20} /> שמור הכנסה</>}
                                         </button>
                                     </form>
                                 </div>
                                 <div className="grid grid-cols-2 gap-3">
-                                    <div className="bg-green-50 p-4 rounded-2xl border border-green-100">
-                                        <p className="text-green-600 text-[10px] font-bold">סה"כ החודש</p>
+                                    <div className="bg-green-50 p-4 rounded-2xl border border-green-100 text-center">
+                                        <p className="text-green-600 text-[10px] font-bold uppercase">סה"כ החודש</p>
                                         <p className="text-green-700 text-xl font-black">₪{stats.totalActual.toLocaleString()}</p>
                                     </div>
-                                    <div className="bg-blue-50 p-4 rounded-2xl border border-blue-100">
-                                        <p className="text-blue-600 text-[10px] font-bold">צפי סוף חודש</p>
+                                    <div className="bg-blue-50 p-4 rounded-2xl border border-blue-100 text-center">
+                                        <p className="text-blue-600 text-[10px] font-bold uppercase">צפי סוף חודש</p>
                                         <p className="text-blue-700 text-xl font-black">₪{Math.round(stats.projection).toLocaleString()}</p>
                                     </div>
                                 </div>
@@ -200,49 +220,108 @@
                         {view === 'dashboard' && (
                             <div className="space-y-6">
                                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-                                    <div className={`p-4 rounded-xl mb-6 ${stats.diff >= 0 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
-                                        <p className="text-xs font-bold uppercase">ביצוע מול יעד נוכחי</p>
-                                        <p className="text-2xl font-black">{stats.diff >= 0 ? '+' : ''}₪{Math.round(Math.abs(stats.diff)).toLocaleString()}</p>
-                                        <p className="text-[10px] opacity-80 mt-1">עברו {stats.passedWorkdays} מתוך {stats.totalWorkdaysInMonth} ימי עבודה</p>
+                                    <div className={`p-5 rounded-xl mb-6 ${stats.diff >= 0 ? 'bg-green-50 text-green-700 border-green-100' : 'bg-red-50 text-red-700 border-red-100'} border`}>
+                                        <p className="text-xs font-bold uppercase tracking-wider">ביצוע מול יעד נוכחי</p>
+                                        <p className="text-3xl font-black mt-1 leading-none">{stats.diff >= 0 ? '+' : ''}₪{Math.round(Math.abs(stats.diff)).toLocaleString()}</p>
+                                        <p className="text-[10px] font-bold opacity-80 mt-3 flex items-center gap-1">
+                                            <Icon name="clock" size={12} />
+                                            עברו {stats.passedWorkdays} מתוך {stats.totalWorkdaysInMonth} ימי עבודה
+                                        </p>
                                     </div>
-                                    <div className="h-2 bg-gray-100 rounded-full overflow-hidden mb-6">
-                                        <div style={{width: `${Math.min(stats.percentage, 100)}%`}} className="h-full bg-blue-500 transition-all duration-1000"></div>
+                                    
+                                    <div className="space-y-2 mb-6">
+                                        <div className="flex justify-between text-[10px] font-bold text-gray-400">
+                                            <span>יעד חודשי: ₪{target.toLocaleString()}</span>
+                                            <span>{Math.round(stats.percentage)}%</span>
+                                        </div>
+                                        <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
+                                            <div style={{width: `${Math.min(stats.percentage, 100)}%`}} className="h-full bg-blue-500 transition-all duration-1000 shadow-sm"></div>
+                                        </div>
                                     </div>
-                                    <div className="bg-gray-50 rounded-xl p-4 overflow-hidden">
+
+                                    <div className="bg-gray-50 rounded-xl p-4 overflow-hidden border border-gray-100">
+                                        <p className="text-[10px] font-bold text-gray-400 mb-4 uppercase text-right">גרף התקדמות</p>
                                         <svg viewBox="0 0 300 150" className="w-full overflow-visible">
                                             <path d={`M 0 150 L 300 0`} fill="none" stroke="#cbd5e1" strokeWidth="1" strokeDasharray="4 2" />
                                             <path 
-                                                d={`M 0 150 L ${stats.dailyData.filter(d => d.actual !== null).map(d => `${(d.day/stats.daysInMonth)*300},${150 - (d.actual/Math.max(target, stats.totalActual)*150)}`).join(' L ')}`} 
+                                                d={`M 0 150 L ${stats.dailyData.filter(d => d.actual !== null).map(d => `${(d.day/stats.daysInMonth)*300},${150 - (d.actual/Math.max(target, stats.totalActual || 1)*150)}`).join(' L ')}`} 
                                                 fill="none" stroke="#3b82f6" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" 
+                                                className="animate-chart-draw"
                                             />
                                         </svg>
-                                        <div className="flex justify-between mt-2 text-[9px] text-gray-400 font-bold">
+                                        <div className="flex justify-between mt-3 text-[9px] text-gray-400 font-bold uppercase tracking-tight">
                                             <span>1 לחודש</span>
                                             <span>{stats.daysInMonth} לחודש</span>
                                         </div>
+                                    </div>
+                                </div>
+
+                                <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                                    <h3 className="text-xs font-bold text-gray-400 uppercase mb-4 tracking-widest">פעולות אחרונות</h3>
+                                    <div className="space-y-3">
+                                        {entries.slice(0, 5).map(e => (
+                                            <div key={e.id} className="flex justify-between items-center p-3 bg-gray-50 rounded-xl border border-gray-100">
+                                                <div className="flex items-center gap-3">
+                                                    <div className={`w-2 h-2 rounded-full ${PAYMENT_METHODS.find(m => m.id === e.method)?.color || 'bg-gray-300'}`}></div>
+                                                    <div>
+                                                        <p className="text-sm font-black">₪{e.amount.toLocaleString()}</p>
+                                                        <p className="text-[10px] text-gray-400">{e.date}</p>
+                                                    </div>
+                                                </div>
+                                                <span className="text-[9px] font-bold bg-white px-2 py-1 rounded-md border text-gray-500">{PAYMENT_METHODS.find(m => m.id === e.method)?.label}</span>
+                                            </div>
+                                        ))}
                                     </div>
                                 </div>
                             </div>
                         )}
 
                         {view === 'settings' && (
-                            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 space-y-6">
+                            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 space-y-6 animate-in slide-in-from-right duration-300">
+                                <h3 className="font-bold border-b pb-2">הגדרות מערכת</h3>
                                 <div>
                                     <label className="block text-sm font-bold text-gray-500 mb-2">יעד הכנסה חודשי</label>
-                                    <input type="number" value={target} onChange={e => setTarget(Number(e.target.value))} className="w-full p-4 bg-gray-50 rounded-xl font-bold text-xl text-center" />
+                                    <input type="number" value={target} onChange={e => setTarget(Number(e.target.value))} className="w-full p-4 bg-gray-50 rounded-xl font-bold text-xl text-center border focus:ring-2 focus:ring-blue-500 outline-none" />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-bold text-gray-500 mb-2">Google Sheets Script URL</label>
-                                    <input type="text" value={scriptUrl} onChange={e => setScriptUrl(e.target.value)} className="w-full p-3 bg-gray-50 rounded-lg text-xs dir-ltr border" placeholder="https://..." />
+                                    <label className="block text-sm font-bold text-gray-500 mb-2">כתובת Google Script (סנכרון)</label>
+                                    <input type="text" value={scriptUrl} onChange={e => setScriptUrl(e.target.value)} className="w-full p-3 bg-gray-50 rounded-lg text-xs dir-ltr border font-mono outline-none" placeholder="https://script.google.com/..." />
                                 </div>
-                                <button onClick={() => { if(confirm('למחוק הכל?')) setEntries([]); }} className="w-full text-red-500 text-xs font-bold py-2">איפוס נתוני אפליקציה</button>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-500 mb-2">כתובת הגיליון (Table View)</label>
+                                    <input type="text" value={sheetUrl} onChange={e => setSheetUrl(e.target.value)} className="w-full p-3 bg-gray-50 rounded-lg text-xs dir-ltr border font-mono outline-none" placeholder="https://docs.google.com/spreadsheets/..." />
+                                    <p className="text-[10px] text-gray-400 mt-1">הדבק כאן את כתובת ה-URL של גיליון ה-Google Sheets שלך.</p>
+                                </div>
+                                <div className="pt-4">
+                                    <button onClick={() => { if(confirm('פעולה זו תמחק את כל ההיסטוריה השמורה במכשיר. להמשיך?')) setEntries([]); }} className="w-full text-red-500 text-xs font-bold py-3 border border-red-50 rounded-xl hover:bg-red-50 transition-all">איפוס נתוני אפליקציה</button>
+                                </div>
+                                <button onClick={() => setView('input')} className="w-full bg-gray-900 text-white font-bold py-4 rounded-xl shadow-md active:scale-95 transition-all">סיום וחזרה</button>
                             </div>
                         )}
                     </main>
 
-                    <nav className="fixed bottom-0 left-0 right-0 bg-white border-t p-4 flex justify-around max-w-md mx-auto shadow-lg">
-                        <button onClick={() => setView('input')} className={view === 'input' ? 'text-blue-600' : 'text-gray-400'}><Icon name="plus-circle" /><p className="text-[10px] font-bold">הזנה</p></button>
-                        <button onClick={() => setView('dashboard')} className={view === 'dashboard' ? 'text-blue-600' : 'text-gray-400'}><Icon name="bar-chart-3" /><p className="text-[10px] font-bold">ניתוח</p></button>
+                    <nav className="fixed bottom-0 left-0 right-0 bg-white border-t p-4 flex justify-around max-w-md mx-auto shadow-[0_-5px_15px_rgba(0,0,0,0.05)] rounded-t-3xl z-20">
+                        <button onClick={() => setView('input')} className={`flex flex-col items-center gap-1 transition-all ${view === 'input' ? 'text-blue-600 scale-110 font-bold' : 'text-gray-400'}`}>
+                            <Icon name="plus-circle" size={24} />
+                            <p className="text-[10px]">הזנה</p>
+                        </button>
+                        
+                        <button onClick={() => setView('dashboard')} className={`flex flex-col items-center gap-1 transition-all ${view === 'dashboard' ? 'text-blue-600 scale-110 font-bold' : 'text-gray-400'}`}>
+                            <Icon name="bar-chart-3" size={24} />
+                            <p className="text-[10px]">ניתוח</p>
+                        </button>
+
+                        {sheetUrl ? (
+                            <a href={sheetUrl} target="_blank" rel="noopener noreferrer" className="flex flex-col items-center gap-1 text-gray-400 hover:text-green-600 transition-all">
+                                <Icon name="table" size={24} />
+                                <p className="text-[10px] font-bold">טבלה</p>
+                            </a>
+                        ) : (
+                            <button onClick={() => setView('settings')} className="flex flex-col items-center gap-1 text-gray-200">
+                                <Icon name="table" size={24} />
+                                <p className="text-[10px] font-bold">טבלה</p>
+                            </button>
+                        )}
                     </nav>
                 </div>
             );
