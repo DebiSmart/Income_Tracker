@@ -3,6 +3,373 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>הכנסות פלוס - סנכרון GitHub</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- טעינת קובץ ההגדרות המקביל -->
+    <script src="config.js"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Assistant:wght@300;400;700;800&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Assistant', sans-serif; background-color: #f8fafc; }
+        input[type="date"]::-webkit-calendar-picker-indicator {
+            background: transparent; bottom: 0; color: transparent; cursor: pointer;
+            height: auto; left: 0; position: absolute; right: 0; top: 0; width: auto;
+        }
+        .dir-ltr { direction: ltr; }
+        @keyframes chart-draw { from { stroke-dasharray: 1000; stroke-dashoffset: 1000; } to { stroke-dashoffset: 0; } }
+        .animate-chart-draw { animation: chart-draw 2s ease-out forwards; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useCallback } = React;
+
+        const Icon = ({ name, size = 24, className = "" }) => {
+            useEffect(() => { if (window.lucide) lucide.createIcons(); }, [name]);
+            return <i data-lucide={name} style={{ width: size, height: size }} className={className}></i>;
+        };
+
+        const PAYMENT_METHODS = [
+            { id: 'paybox', label: 'פייבוקס', color: 'bg-blue-500' },
+            { id: 'bit', label: 'ביט', color: 'bg-purple-500' },
+            { id: 'cash', label: 'מזומן', color: 'bg-green-600' },
+            { id: 'paybox2', label: 'פייבוקס 2', color: 'bg-blue-700' },
+            { id: 'bit2', label: 'ביט 2', color: 'bg-purple-700' },
+        ];
+
+        const isWorkday = (year, month, day) => {
+            const date = new Date(year, month, day);
+            const dayOfWeek = date.getDay(); 
+            return dayOfWeek !== 5 && dayOfWeek !== 6;
+        };
+
+        function App() {
+            const [view, setView] = useState('input');
+            const [entries, setEntries] = useState([]);
+            const [settings, setSettings] = useState({ target: 15000, scriptUrl: '', sheetUrl: '' });
+            const [isSyncing, setIsSyncing] = useState(true);
+            const [message, setMessage] = useState(null);
+            const [showClearConfirm, setShowClearConfirm] = useState(false);
+
+            const [amount, setAmount] = useState('');
+            const [method, setMethod] = useState('bit');
+            const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+
+            // סנכרון נתונים מהגיליון (קריאה)
+            const syncWithSheet = useCallback(async (url) => {
+                if (!url || !url.startsWith('http')) return;
+                setIsSyncing(true);
+                try {
+                    const response = await fetch(url);
+                    const data = await response.json();
+                    if (Array.isArray(data)) {
+                        const formattedData = data.map(item => ({
+                            id: item.id || Math.random(),
+                            amount: Number(item.amount),
+                            date: String(item.date),
+                            method: String(item.method || 'bit')
+                        })).sort((a, b) => new Date(b.date) - new Date(a.date));
+                        
+                        setEntries(formattedData);
+                        localStorage.setItem('income_entries', JSON.stringify(formattedData));
+                    }
+                } catch (err) {
+                    console.error("Sheet sync error:", err);
+                } finally {
+                    setIsSyncing(false);
+                }
+            }, []);
+
+            // טעינה ראשונית - עדיפות לקובץ config.js מ-GitHub
+            useEffect(() => {
+                let initialSettings = { target: 15000, scriptUrl: '', sheetUrl: '' };
+
+                // 1. בדיקה אם קיים קובץ הגדרות חיצוני (window.APP_CONFIG מגיע מ-config.js)
+                if (window.APP_CONFIG) {
+                    initialSettings = { ...initialSettings, ...window.APP_CONFIG };
+                } else {
+                    // 2. פולבאק ל-LocalStorage אם אין קובץ חיצוני
+                    const savedTarget = localStorage.getItem('income_target');
+                    const savedUrl = localStorage.getItem('income_script_url');
+                    const savedSheet = localStorage.getItem('income_sheet_url');
+                    if (savedTarget) initialSettings.target = Number(savedTarget);
+                    if (savedUrl) initialSettings.scriptUrl = savedUrl;
+                    if (savedSheet) initialSettings.sheetUrl = savedSheet;
+                }
+
+                setSettings(initialSettings);
+
+                const savedEntries = localStorage.getItem('income_entries');
+                if (savedEntries) setEntries(JSON.parse(savedEntries));
+
+                // סנכרון נתונים מהענן (Google Sheets) בטעינה
+                if (initialSettings.scriptUrl) {
+                    syncWithSheet(initialSettings.scriptUrl);
+                } else {
+                    setIsSyncing(false);
+                }
+            }, [syncWithSheet]);
+
+            const stats = useMemo(() => {
+                const now = new Date();
+                const currentMonth = now.getMonth();
+                const currentYear = now.getFullYear();
+                const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+                const dayOfMonth = now.getDate();
+
+                let totalWorkdaysInMonth = 0;
+                let passedWorkdays = 0;
+                for (let d = 1; d <= daysInMonth; d++) {
+                    if (isWorkday(currentYear, currentMonth, d)) {
+                        totalWorkdaysInMonth++;
+                        if (d <= dayOfMonth) passedWorkdays++;
+                    }
+                }
+
+                const monthlyEntries = entries.filter(e => {
+                    const eDate = new Date(e.date);
+                    return eDate.getMonth() === currentMonth && eDate.getFullYear() === currentYear;
+                });
+
+                const totalActual = monthlyEntries.reduce((sum, e) => sum + Number(e.amount || 0), 0);
+                const safeTarget = Number(settings.target) || 15000;
+                const targetPerWorkday = safeTarget / (totalWorkdaysInMonth || 1);
+                const targetToDate = targetPerWorkday * passedWorkdays;
+                const projection = passedWorkdays > 0 ? (totalActual / passedWorkdays) * totalWorkdaysInMonth : 0;
+                const diff = totalActual - targetToDate;
+
+                return { totalActual, targetToDate, projection, diff, percentage: safeTarget > 0 ? (totalActual / safeTarget) * 100 : 0, passedWorkdays, totalWorkdaysInMonth, monthlyEntries };
+            }, [entries, settings]);
+
+            const handleSaveEntry = async (e) => {
+                e.preventDefault();
+                if (!amount) return;
+
+                const newEntry = {
+                    amount: Number(amount),
+                    method: String(method),
+                    date: String(date),
+                    timestamp: new Date().toISOString()
+                };
+
+                // עדכון מקומי זמני
+                const updated = [ { ...newEntry, id: Date.now() }, ...entries ];
+                setEntries(updated);
+
+                // שליחה ל-Google Sheets (הענן שלכם)
+                if (settings.scriptUrl && settings.scriptUrl.startsWith('http')) {
+                    setIsSyncing(true);
+                    try {
+                        await fetch(settings.scriptUrl, { method: 'POST', mode: 'no-cors', body: JSON.stringify(newEntry) });
+                        // רענון נתונים מהגיליון לאחר השמירה
+                        setTimeout(() => syncWithSheet(settings.scriptUrl), 1500);
+                        setMessage({ text: 'הכנסה נשמרה וסונכרנה!' });
+                    } catch (err) {
+                        console.error(err);
+                        setMessage({ text: 'נשמר מקומית (שגיאת סנכרון)' });
+                    }
+                } else {
+                    localStorage.setItem('income_entries', JSON.stringify(updated));
+                    setMessage({ text: 'נשמר במכשיר (חסר URL)' });
+                }
+
+                setAmount('');
+                setTimeout(() => setMessage(null), 3000);
+            };
+
+            const clearRecent = () => {
+                setEntries([]);
+                localStorage.setItem('income_entries', JSON.stringify([]));
+                setShowClearConfirm(false);
+                setMessage({ text: 'התצוגה נוקתה' });
+                setTimeout(() => setMessage(null), 3000);
+            };
+
+            return (
+                <div className="min-h-screen pb-24">
+                    <header className="bg-white p-6 border-b sticky top-0 z-10 shadow-sm flex justify-between items-center max-w-md mx-auto">
+                        <div className="flex items-center gap-2">
+                            <Icon name="database" size={18} className={settings.scriptUrl ? "text-emerald-500" : "text-slate-300"} />
+                            <div>
+                                <h1 className="text-xl font-black">הכנסות פלוס</h1>
+                                <p className="text-gray-400 text-[10px]">{settings.scriptUrl ? "סנכרון ענן פעיל" : "מצב מקומי"}</p>
+                            </div>
+                        </div>
+                        <div className="flex gap-1">
+                            <button onClick={() => syncWithSheet(settings.scriptUrl)} className={`text-slate-400 p-2 ${isSyncing ? 'animate-spin text-blue-500' : ''}`}>
+                                <Icon name="refresh-cw" size={20} />
+                            </button>
+                            <button onClick={() => setView('settings')} className="text-slate-400 p-2"><Icon name="settings" size={22} /></button>
+                        </div>
+                    </header>
+
+                    <main className="max-w-md mx-auto p-4 space-y-6 text-right">
+                        {message && (
+                            <div className="bg-slate-800 text-white p-3 rounded-xl text-center font-bold text-sm shadow-lg animate-in slide-in-from-top duration-300">
+                                {String(message.text)}
+                            </div>
+                        )}
+
+                        {view === 'input' && (
+                            <div className="space-y-6 animate-in fade-in duration-500">
+                                <div className="bg-white p-6 rounded-[2rem] shadow-xl shadow-slate-200/50 border border-white">
+                                    <form onSubmit={handleSaveEntry} className="space-y-6">
+                                        <div className="text-center">
+                                            <label className="text-[10px] font-black text-slate-300 uppercase tracking-widest leading-none">כמה נכנס?</label>
+                                            <input 
+                                                type="number" inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value)}
+                                                placeholder="₪0" className="w-full text-6xl font-black p-2 bg-transparent text-center outline-none placeholder-slate-100" required
+                                            />
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            {PAYMENT_METHODS.map(m => (
+                                                <button key={m.id} type="button" onClick={() => setMethod(m.id)} className={`p-4 rounded-2xl text-xs font-black transition-all ${method === m.id ? 'bg-blue-600 text-white shadow-lg scale-105' : 'bg-slate-50 text-slate-400'}`}>
+                                                    {String(m.label)}
+                                                </button>
+                                            ))}
+                                        </div>
+                                        <div className="relative">
+                                            <input type="date" value={date} onChange={e => setDate(e.target.value)} className="w-full p-4 bg-slate-50 rounded-2xl text-right pr-12 font-bold text-slate-600 outline-none" />
+                                            <Icon name="calendar" className="absolute right-4 top-4 text-slate-300" size={20} />
+                                        </div>
+                                        <button className="w-full bg-slate-900 text-white font-black py-5 rounded-2xl shadow-xl active:scale-95 transition-all flex justify-center items-center gap-2">
+                                            <Icon name="save" size={20} /> שמור וסנכרן
+                                        </button>
+                                    </form>
+                                </div>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div className="bg-emerald-50 p-5 rounded-3xl text-center border border-emerald-100">
+                                        <p className="text-emerald-600 text-[10px] font-black uppercase tracking-wider">סה"כ החודש</p>
+                                        <p className="text-emerald-700 text-2xl font-black">₪{Number(stats.totalActual).toLocaleString()}</p>
+                                    </div>
+                                    <div className="bg-blue-50 p-5 rounded-3xl text-center border border-blue-100">
+                                        <p className="text-blue-600 text-[10px] font-black uppercase tracking-wider">צפי לסוף חודש</p>
+                                        <p className="text-blue-700 text-2xl font-black">₪{Math.round(Number(stats.projection)).toLocaleString()}</p>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {view === 'dashboard' && (
+                            <div className="space-y-6 animate-in fade-in duration-500">
+                                <div className="bg-white p-6 rounded-[2rem] shadow-lg border border-slate-50">
+                                    <div className={`p-5 rounded-2xl mb-6 ${stats.diff >= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'} border`}>
+                                        <p className="text-[10px] font-black uppercase tracking-widest opacity-60">ביצוע מול יעד נוכחי</p>
+                                        <p className="text-4xl font-black mt-1 leading-none">{stats.diff >= 0 ? '+' : ''}₪{Math.round(Math.abs(stats.diff)).toLocaleString()}</p>
+                                        <p className="text-[10px] font-bold mt-3">יום עבודה {Number(stats.passedWorkdays)} מתוך {Number(stats.totalWorkdaysInMonth)}</p>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <div className="flex justify-between text-[10px] font-black text-slate-400">
+                                            <span>התקדמות יעד חודשי</span>
+                                            <span>{Math.round(Number(stats.percentage))}%</span>
+                                        </div>
+                                        <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                                            <div style={{width: `${Math.min(stats.percentage, 100)}%`}} className="h-full bg-blue-500 transition-all duration-1000"></div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="bg-white p-6 rounded-[2rem] shadow-lg border border-slate-50">
+                                    <div className="flex justify-between items-center mb-4">
+                                        {!showClearConfirm ? (
+                                            <button onClick={() => setShowClearConfirm(true)} className="text-slate-200 hover:text-rose-500 transition-colors">
+                                                <Icon name="trash-2" size={18} />
+                                            </button>
+                                        ) : (
+                                            <div className="flex gap-2">
+                                                <button onClick={clearRecent} className="bg-rose-500 text-white text-[10px] px-2 py-1 rounded-lg font-bold">מחק תצוגה</button>
+                                                <button onClick={() => setShowClearConfirm(false)} className="bg-slate-100 text-slate-400 text-[10px] px-2 py-1 rounded-lg font-bold">ביטול</button>
+                                            </div>
+                                        )}
+                                        <h3 className="font-black text-slate-800 text-xs uppercase tracking-widest">פעולות אחרונות בגיליון</h3>
+                                    </div>
+                                    <div className="space-y-3">
+                                        {stats.monthlyEntries.length === 0 ? (
+                                            <p className="text-center text-slate-300 text-xs py-8 italic">אין נתונים להצגה (נסה לרענן)</p>
+                                        ) : (
+                                            stats.monthlyEntries.slice(0, 10).map(e => (
+                                                <div key={e.id} className="flex justify-between items-center p-4 bg-slate-50 rounded-2xl border border-white">
+                                                    <div className="flex items-center gap-3">
+                                                        <div className={`w-2.5 h-2.5 rounded-full ${PAYMENT_METHODS.find(m => m.id === e.method)?.color || 'bg-slate-300'}`}></div>
+                                                        <div>
+                                                            <p className="text-base font-black">₪{Number(e.amount).toLocaleString()}</p>
+                                                            <p className="text-[10px] font-bold text-slate-400 uppercase">{String(e.date).split('-').reverse().join('/')}</p>
+                                                        </div>
+                                                    </div>
+                                                    <span className="text-[9px] font-black bg-white px-3 py-1 rounded-full border text-slate-500 shadow-sm">{String(PAYMENT_METHODS.find(m => m.id === e.method)?.label || '')}</span>
+                                                </div>
+                                            ))
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {view === 'settings' && (
+                            <div className="bg-white p-8 rounded-[2rem] shadow-xl border border-white space-y-8 animate-in slide-in-from-right-8 duration-500">
+                                <div className="flex items-center gap-2 border-b pb-4">
+                                    <Icon name="settings" size={20} className="text-slate-400" />
+                                    <h3 className="font-black text-slate-800">הגדרות מערכת</h3>
+                                </div>
+                                <div className="space-y-6">
+                                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                                        <p className="text-[10px] text-blue-500 font-bold mb-2 uppercase">שים לב: הגדרות אלו נטענות מקובץ config.js</p>
+                                        <label className="block text-xs font-black text-slate-400 mb-1 uppercase tracking-widest">יעד הכנסה</label>
+                                        <p className="text-2xl font-black text-slate-800">₪{Number(settings.target).toLocaleString()}</p>
+                                    </div>
+                                    <div className="space-y-4">
+                                        <div className="text-right">
+                                            <label className="block text-xs font-black text-slate-400 mb-1 uppercase tracking-widest">Script URL</label>
+                                            <p className="text-[10px] font-mono text-slate-300 break-all dir-ltr">{String(settings.scriptUrl) || 'לא הוגדר'}</p>
+                                        </div>
+                                        <div className="text-right">
+                                            <label className="block text-xs font-black text-slate-400 mb-1 uppercase tracking-widest">Sheet URL</label>
+                                            <p className="text-[10px] font-mono text-slate-300 break-all dir-ltr">{String(settings.sheetUrl) || 'לא הוגדר'}</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="text-[10px] text-slate-400 leading-relaxed">
+                                    כדי לשנות את ההגדרות עבור כל המכשירים, ערוך את הקובץ <strong>config.js</strong> ב-GitHub שלך.
+                                </div>
+                                <button onClick={() => setView('input')} className="w-full bg-slate-900 text-white font-black py-4 rounded-2xl shadow-lg">חזרה</button>
+                            </div>
+                        )}
+                    </main>
+
+                    <nav className="fixed bottom-0 left-0 right-0 bg-white/80 backdrop-blur-xl border-t p-4 flex justify-around max-w-md mx-auto shadow-2xl rounded-t-[2.5rem] z-20">
+                        <button onClick={() => setView('input')} className={`flex flex-col items-center gap-1 transition-all ${view === 'input' ? 'text-blue-600 scale-110 font-black' : 'text-slate-300'}`}>
+                            <Icon name="plus-circle" size={26} strokeWidth={3} />
+                            <p className="text-[10px] uppercase tracking-tighter">הזנה</p>
+                        </button>
+                        <button onClick={() => setView('dashboard')} className={`flex flex-col items-center gap-1 transition-all ${view === 'dashboard' ? 'text-blue-600 scale-110 font-black' : 'text-slate-300'}`}>
+                            <Icon name="layout-dashboard" size={26} />
+                            <p className="text-[10px] uppercase tracking-tighter">ניתוח</p>
+                        </button>
+                        {settings.sheetUrl && (
+                            <a href={String(settings.sheetUrl)} target="_blank" rel="noopener noreferrer" className="flex flex-col items-center gap-1 text-slate-300 hover:text-emerald-500">
+                                <Icon name="table" size={26} />
+                                <p className="text-[10px] uppercase tracking-tighter text-center">טבלה</p>
+                            </a>
+                        )}
+                    </nav>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html><!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>הכנסות פלוס - ניהול משותף</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Firebase Libraries -->
