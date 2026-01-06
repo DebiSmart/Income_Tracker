@@ -60,92 +60,105 @@
             const [entries, setEntries] = useState([]);
             const [settings, setSettings] = useState({ target: 15000, scriptUrl: '', sheetUrl: '' });
             const [isSyncing, setIsSyncing] = useState(true);
-            const [error, setError] = useState(null);
+            const [isCloudEnabled, setIsCloudEnabled] = useState(false);
             const [message, setMessage] = useState(null);
+            const [showClearConfirm, setShowClearConfirm] = useState(false);
 
             const [amount, setAmount] = useState('');
             const [method, setMethod] = useState('bit');
             const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
 
-            // --- Firebase Setup ---
+            // --- Sync Data from Google Sheets ---
+            const syncWithSheet = useCallback(async (url) => {
+                if (!url || !url.startsWith('http')) return;
+                try {
+                    const response = await fetch(url);
+                    const data = await response.json();
+                    if (Array.isArray(data)) {
+                        const formattedData = data.map(item => ({
+                            id: item.id || Math.random(),
+                            amount: Number(item.amount),
+                            date: String(item.date),
+                            method: String(item.method || 'bit')
+                        })).sort((a, b) => new Date(b.date) - new Date(a.date));
+                        
+                        setEntries(formattedData);
+                        localStorage.setItem('income_entries', JSON.stringify(formattedData));
+                    }
+                } catch (err) {
+                    console.error("Sheet sync error:", err);
+                }
+            }, []);
+
+            // --- Initialization Hook ---
             useEffect(() => {
-                const initFirebase = async () => {
-                    try {
-                        const { initializeApp, getFirestore, getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, doc, onSnapshot, collection } = window.FirebaseSDK;
-                        
-                        // בדיקת קיום הגדרות לפני שימוש - פותר את ה-ReferenceError
-                        if (typeof __firebase_config === 'undefined' || !__firebase_config) {
-                            throw new Error("חסרות הגדרות Firebase במערכת.");
-                        }
+                const initMeda = async () => {
+                    // Load basic LocalStorage first for instant UI
+                    const savedTarget = localStorage.getItem('income_target');
+                    const savedUrl = localStorage.getItem('income_script_url');
+                    const savedSheet = localStorage.getItem('income_sheet_url');
+                    const savedEntries = localStorage.getItem('income_entries');
+                    
+                    if (savedTarget) setSettings(s => ({ ...s, target: Number(savedTarget) }));
+                    if (savedUrl) setSettings(s => ({ ...s, scriptUrl: savedUrl }));
+                    if (savedSheet) setSettings(s => ({ ...s, sheetUrl: savedSheet }));
+                    if (savedEntries) setEntries(JSON.parse(savedEntries));
 
-                        const firebaseConfig = JSON.parse(__firebase_config);
-                        const app = initializeApp(firebaseConfig);
-                        const db = getFirestore(app);
-                        const auth = getAuth(app);
-                        const appId = typeof __app_id !== 'undefined' ? __app_id : 'income-tracker-shared';
+                    // Check for Firebase Cloud environment
+                    const sdk = window.FirebaseSDK;
+                    const configStr = window.__firebase_config;
 
-                        // 1. Authentication (Rule 3)
-                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                            await signInWithCustomToken(auth, __initial_auth_token);
-                        } else {
-                            await signInAnonymously(auth);
-                        }
-                        
-                        onAuthStateChanged(auth, (currentUser) => {
-                            if (currentUser) {
-                                setUser(currentUser);
-                                
-                                // 2. Listen to Settings (Shared Cloud Storage - Rule 1: 6 segments)
-                                const settingsRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'config');
-                                onSnapshot(settingsRef, (docSnap) => {
-                                    if (docSnap.exists()) {
-                                        const data = docSnap.data();
-                                        setSettings({
-                                            target: Number(data.target) || 15000,
-                                            scriptUrl: String(data.scriptUrl || ''),
-                                            sheetUrl: String(data.sheetUrl || '')
-                                        });
-                                    }
-                                    setIsSyncing(false);
-                                }, (err) => { 
-                                    console.error("Settings sync error", err); 
-                                    setIsSyncing(false); 
-                                });
+                    if (sdk && configStr) {
+                        try {
+                            const firebaseConfig = JSON.parse(configStr);
+                            const app = sdk.initializeApp(firebaseConfig);
+                            const db = sdk.getFirestore(app);
+                            const auth = sdk.getAuth(app);
+                            const appId = window.__app_id || 'income-tracker-shared';
+                            const token = window.__initial_auth_token;
 
-                                // 3. Listen to Entries (Shared Cloud Storage - Rule 1: 5 segments)
-                                const entriesRef = collection(db, 'artifacts', appId, 'public', 'data', 'entries');
-                                onSnapshot(entriesRef, (snapshot) => {
-                                    const data = snapshot.docs.map(d => {
-                                        const dData = d.data();
-                                        return { 
-                                            id: d.id, 
-                                            amount: Number(dData.amount || 0),
-                                            date: String(dData.date || ''),
-                                            method: String(dData.method || 'bit')
-                                        };
+                            if (token) await sdk.signInWithCustomToken(auth, token);
+                            else await sdk.signInAnonymously(auth);
+
+                            sdk.onAuthStateChanged(auth, (currentUser) => {
+                                if (currentUser) {
+                                    setUser(currentUser);
+                                    setIsCloudEnabled(true);
+                                    
+                                    // Listen to Cloud Settings
+                                    const settingsRef = sdk.doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'config');
+                                    sdk.onSnapshot(settingsRef, (docSnap) => {
+                                        if (docSnap.exists()) setSettings(docSnap.data());
+                                        setIsSyncing(false);
                                     });
-                                    // Rule 2: Sort in memory
-                                    setEntries(data.sort((a, b) => new Date(b.date) - new Date(a.date)));
-                                }, (err) => console.error("Entries sync error", err));
-                            }
-                        });
-                    } catch (err) {
-                        console.error("Firebase Init Error:", err);
-                        setError(err.message);
+
+                                    // Listen to Cloud Entries
+                                    const entriesRef = sdk.collection(db, 'artifacts', appId, 'public', 'data', 'entries');
+                                    sdk.onSnapshot(entriesRef, (snapshot) => {
+                                        const data = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+                                        setEntries(data.sort((a, b) => new Date(b.date) - new Date(a.date)));
+                                    });
+                                }
+                            });
+                        } catch (e) {
+                            console.warn("Cloud init skipped, running in local mode", e);
+                            setIsSyncing(false);
+                        }
+                    } else {
+                        // Regular environment (GitHub)
+                        if (savedUrl) syncWithSheet(savedUrl);
                         setIsSyncing(false);
                     }
                 };
 
-                // המתנה קלה כדי לוודא שה-SDK נטען מה-Module
                 const checkSDK = setInterval(() => {
-                    if (window.FirebaseSDK) {
+                    if (window.FirebaseSDK || !window.__firebase_config) {
                         clearInterval(checkSDK);
-                        initFirebase();
+                        initMeda();
                     }
-                }, 100);
-                
+                }, 200);
                 return () => clearInterval(checkSDK);
-            }, []);
+            }, [syncWithSheet]);
 
             const stats = useMemo(() => {
                 const now = new Date();
@@ -168,84 +181,81 @@
                     return eDate.getMonth() === currentMonth && eDate.getFullYear() === currentYear;
                 });
 
-                const totalActual = monthlyEntries.reduce((sum, e) => sum + Number(e.amount), 0);
+                const totalActual = monthlyEntries.reduce((sum, e) => sum + Number(e.amount || 0), 0);
                 const safeTarget = Number(settings.target) || 15000;
                 const targetPerWorkday = safeTarget / (totalWorkdaysInMonth || 1);
                 const targetToDate = targetPerWorkday * passedWorkdays;
                 const projection = passedWorkdays > 0 ? (totalActual / passedWorkdays) * totalWorkdaysInMonth : 0;
                 const diff = totalActual - targetToDate;
 
-                return { 
-                    totalActual, 
-                    targetToDate, 
-                    projection, 
-                    diff, 
-                    percentage: safeTarget > 0 ? (totalActual / safeTarget) * 100 : 0, 
-                    passedWorkdays, 
-                    totalWorkdaysInMonth, 
-                    daysInMonth, 
-                    dayOfMonth 
-                };
+                return { totalActual, targetToDate, projection, diff, percentage: safeTarget > 0 ? (totalActual / safeTarget) * 100 : 0, passedWorkdays, totalWorkdaysInMonth, monthlyEntries };
             }, [entries, settings]);
 
             const handleSaveEntry = async (e) => {
                 e.preventDefault();
-                if (!amount || !user) return;
+                if (!amount) return;
 
                 const newEntry = {
                     amount: Number(amount),
                     method: String(method),
                     date: String(date),
-                    timestamp: new Date().toISOString(),
-                    createdBy: String(user.uid)
+                    timestamp: new Date().toISOString()
                 };
 
-                const { getFirestore, collection, addDoc } = window.FirebaseSDK;
-                const db = getFirestore();
-                const appId = typeof __app_id !== 'undefined' ? __app_id : 'income-tracker-shared';
+                // 1. Local Update
+                if (!isCloudEnabled) {
+                    const updated = [ { ...newEntry, id: Date.now() }, ...entries ];
+                    setEntries(updated);
+                    localStorage.setItem('income_entries', JSON.stringify(updated));
+                } else {
+                    // Cloud Save
+                    const sdk = window.FirebaseSDK;
+                    const db = sdk.getFirestore();
+                    const appId = window.__app_id || 'income-tracker-shared';
+                    try {
+                        await sdk.addDoc(sdk.collection(db, 'artifacts', appId, 'public', 'data', 'entries'), newEntry);
+                    } catch (err) { console.error(err); }
+                }
 
-                try {
-                    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'entries'), newEntry);
+                // 2. Sheets Sync (Primary Cross-Device Cloud)
+                if (settings.scriptUrl && settings.scriptUrl.startsWith('http')) {
+                    fetch(settings.scriptUrl, { method: 'POST', mode: 'no-cors', body: JSON.stringify(newEntry) })
+                        .then(() => setTimeout(() => syncWithSheet(settings.scriptUrl), 1500));
+                }
 
-                    if (settings.scriptUrl && settings.scriptUrl.startsWith('http')) {
-                        fetch(settings.scriptUrl, { method: 'POST', mode: 'no-cors', body: JSON.stringify(newEntry) });
-                    }
-
-                    setAmount('');
-                    setMessage({ text: 'נשמר בענן!' });
-                    setTimeout(() => setMessage(null), 3000);
-                } catch (err) { console.error(err); }
+                setAmount('');
+                setMessage({ text: 'נשמר בהצלחה!' });
+                setTimeout(() => setMessage(null), 3000);
             };
 
             const handleUpdateSettings = async (field, value) => {
                 const newSettings = { ...settings, [field]: value };
                 setSettings(newSettings);
+                localStorage.setItem(`income_${field}`, value);
                 
-                const { getFirestore, doc, setDoc } = window.FirebaseSDK;
-                const db = getFirestore();
-                const appId = typeof __app_id !== 'undefined' ? __app_id : 'income-tracker-shared';
-                
-                try {
-                    await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'config'), newSettings, { merge: true });
-                } catch (err) { console.error(err); }
+                if (isCloudEnabled) {
+                    const sdk = window.FirebaseSDK;
+                    const db = sdk.getFirestore();
+                    const appId = window.__app_id || 'income-tracker-shared';
+                    try {
+                        await sdk.setDoc(sdk.doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'config'), newSettings, { merge: true });
+                    } catch (err) { console.error(err); }
+                }
             };
 
-            if (isSyncing) return (
-                <div className="h-screen flex items-center justify-center bg-slate-50">
-                    <div className="text-center animate-pulse">
-                        <Icon name="cloud-lightning" className="text-blue-500 mx-auto mb-2" size={48} />
-                        <p className="font-bold text-slate-400">מתחבר לענן משותף...</p>
-                    </div>
-                </div>
-            );
+            const clearRecent = () => {
+                setEntries([]);
+                localStorage.setItem('income_entries', JSON.stringify([]));
+                setShowClearConfirm(false);
+                setMessage({ text: 'התצוגה נוקתה' });
+                setTimeout(() => setMessage(null), 3000);
+            };
 
-            if (error) return (
-                <div className="h-screen flex items-center justify-center bg-slate-50 p-6">
-                    <div className="bg-white p-8 rounded-3xl shadow-xl text-center max-w-sm space-y-4">
-                        <Icon name="alert-triangle" className="text-rose-500 mx-auto" size={48} />
-                        <h2 className="text-xl font-bold text-slate-800">שגיאת חיבור</h2>
-                        <p className="text-slate-500 text-sm">{String(error)}</p>
-                        <button onClick={() => location.reload()} className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold">נסה שוב</button>
+            if (isSyncing && window.__firebase_config) return (
+                <div className="h-screen flex items-center justify-center bg-slate-50">
+                    <div className="text-center animate-pulse text-blue-500">
+                        <Icon name="cloud-lightning" size={48} className="mx-auto mb-2" />
+                        <p className="font-bold">טוען נתונים...</p>
                     </div>
                 </div>
             );
@@ -254,10 +264,13 @@
                 <div className="min-h-screen pb-24">
                     <header className="bg-white p-6 border-b sticky top-0 z-10 shadow-sm flex justify-between items-center max-w-md mx-auto">
                         <div className="flex items-center gap-2">
-                            <Icon name="cloud" size={18} className="text-emerald-500" />
+                            <Icon name="cloud" size={18} className={isCloudEnabled ? "text-emerald-500" : "text-slate-300"} />
                             <h1 className="text-xl font-black">הכנסות פלוס</h1>
                         </div>
-                        <button onClick={() => setView('settings')} className="text-gray-400 p-2"><Icon name="settings" size={22} /></button>
+                        <div className="flex gap-1">
+                            <button onClick={() => syncWithSheet(settings.scriptUrl)} className="text-slate-400 p-2"><Icon name="refresh-cw" size={20} /></button>
+                            <button onClick={() => setView('settings')} className="text-slate-400 p-2"><Icon name="settings" size={22} /></button>
+                        </div>
                     </header>
 
                     <main className="max-w-md mx-auto p-4 space-y-6 text-right">
@@ -272,7 +285,7 @@
                                 <div className="bg-white p-6 rounded-[2rem] shadow-xl shadow-slate-200/50 border border-white">
                                     <form onSubmit={handleSaveEntry} className="space-y-6">
                                         <div className="text-center">
-                                            <label className="text-[10px] font-black text-slate-300 uppercase tracking-widest">סכום הכנסה</label>
+                                            <label className="text-[10px] font-black text-slate-300 uppercase tracking-widest leading-none">סכום הכנסה</label>
                                             <input 
                                                 type="number" inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value)}
                                                 placeholder="₪0" className="w-full text-6xl font-black p-2 bg-transparent text-center outline-none placeholder-slate-100" required
@@ -290,7 +303,7 @@
                                             <Icon name="calendar" className="absolute right-4 top-4 text-slate-300" size={20} />
                                         </div>
                                         <button className="w-full bg-slate-900 text-white font-black py-5 rounded-2xl shadow-xl active:scale-95 transition-all flex justify-center items-center gap-2">
-                                            <Icon name="save" size={20} /> שמור הכנסה משותפת
+                                            <Icon name="save" size={20} /> שמור הכנסה
                                         </button>
                                     </form>
                                 </div>
@@ -325,16 +338,29 @@
                                         </div>
                                     </div>
                                 </div>
+
                                 <div className="bg-white p-6 rounded-[2rem] shadow-lg border border-slate-50">
-                                    <h3 className="font-black text-slate-800 mb-4 text-xs uppercase tracking-widest">פעולות אחרונות בענן</h3>
+                                    <div className="flex justify-between items-center mb-4">
+                                        {!showClearConfirm ? (
+                                            <button onClick={() => setShowClearConfirm(true)} className="text-slate-200 hover:text-rose-500 transition-colors">
+                                                <Icon name="trash-2" size={18} />
+                                            </button>
+                                        ) : (
+                                            <div className="flex gap-2">
+                                                <button onClick={clearRecent} className="bg-rose-500 text-white text-[10px] px-2 py-1 rounded-lg font-bold">מחק</button>
+                                                <button onClick={() => setShowClearConfirm(false)} className="bg-slate-100 text-slate-400 text-[10px] px-2 py-1 rounded-lg font-bold">בטל</button>
+                                            </div>
+                                        )}
+                                        <h3 className="font-black text-slate-800 text-xs uppercase tracking-widest">פעולות אחרונות</h3>
+                                    </div>
                                     <div className="space-y-3">
-                                        {entries.slice(0, 10).map(e => (
+                                        {stats.monthlyEntries.slice(0, 10).map(e => (
                                             <div key={e.id} className="flex justify-between items-center p-4 bg-slate-50 rounded-2xl border border-white">
                                                 <div className="flex items-center gap-3">
                                                     <div className={`w-2.5 h-2.5 rounded-full ${PAYMENT_METHODS.find(m => m.id === e.method)?.color || 'bg-slate-300'}`}></div>
                                                     <div>
                                                         <p className="text-base font-black">₪{Number(e.amount).toLocaleString()}</p>
-                                                        <p className="text-[10px] font-bold text-slate-400 uppercase">{String(e.date)}</p>
+                                                        <p className="text-[10px] font-bold text-slate-400 uppercase">{String(e.date).split('-').reverse().join('/')}</p>
                                                     </div>
                                                 </div>
                                                 <span className="text-[9px] font-black bg-white px-3 py-1 rounded-full border text-slate-500 shadow-sm">{String(PAYMENT_METHODS.find(m => m.id === e.method)?.label || '')}</span>
@@ -347,7 +373,7 @@
 
                         {view === 'settings' && (
                             <div className="bg-white p-8 rounded-[2rem] shadow-xl border border-white space-y-8 animate-in slide-in-from-right-8 duration-500">
-                                <h3 className="font-black border-b pb-4 text-slate-800">הגדרות ענן משותפות</h3>
+                                <h3 className="font-black border-b pb-4 text-slate-800">הגדרות מערכת</h3>
                                 <div className="space-y-6">
                                     <div>
                                         <label className="block text-xs font-black text-slate-400 mb-2 uppercase tracking-widest">יעד הכנסה חודשי</label>
