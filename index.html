@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>הכנסות פלוס</title>
+    <title>הכנסות פלוס - Mobile Ready</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- טעינת קובץ ההגדרות מ-GitHub -->
     <script src="config.js"></script>
@@ -11,7 +11,7 @@
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Assistant:wght@300;400;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;700;800&display=swap" rel="stylesheet">
     <style>
         body { font-family: 'Assistant', sans-serif; background-color: #f8fafc; overflow-x: hidden; }
         input[type="date"]::-webkit-calendar-picker-indicator {
@@ -21,7 +21,8 @@
         .dir-ltr { direction: ltr; }
         @keyframes chart-draw { from { stroke-dasharray: 1000; stroke-dashoffset: 1000; } to { stroke-dashoffset: 0; } }
         .animate-chart-draw { animation: chart-draw 2s ease-out forwards; }
-        .custom-shadow { box-shadow: 0 10px 40px -10px rgba(0,0,0,0.05); }
+        /* מניעת גלילה במסך הראשי במובייל */
+        .app-container { height: 100vh; display: flex; flex-direction: column; }
     </style>
 </head>
 <body>
@@ -30,18 +31,17 @@
     <script type="text/babel">
         const { useState, useEffect, useMemo, useCallback } = React;
 
-        // רכיב אייקון חסין
         const Icon = ({ name, size = 24, className = "", strokeWidth = 2 }) => {
             useEffect(() => { if (window.lucide) lucide.createIcons(); }, [name]);
             return <i data-lucide={name} style={{ width: size, height: size }} className={className} data-lucide-stroke-width={strokeWidth}></i>;
         };
 
         const PAYMENT_METHODS = [
-            { id: 'paybox', label: 'paybox', color: 'bg-blue-500' },
-            { id: 'bit', label: 'bit', color: 'bg-purple-500' },
-            { id: 'cash', label: 'cash', color: 'bg-green-600' },
-            { id: 'paybox2', label: 'paybox2', color: 'bg-blue-700' },
-            { id: 'bit2', label: 'bit2', color: 'bg-purple-700' },
+            { id: 'paybox', label: 'Paybox', color: 'bg-blue-500' },
+            { id: 'bit', label: 'Bit', color: 'bg-purple-500' },
+            { id: 'cash', label: 'Cash', color: 'bg-green-600' },
+            { id: 'paybox2', label: 'Paybox 2', color: 'bg-blue-700' },
+            { id: 'bit2', label: 'Bit 2', color: 'bg-purple-700' },
         ];
 
         const isWorkday = (year, month, day) => {
@@ -50,7 +50,6 @@
             return dayOfWeek !== 5 && dayOfWeek !== 6;
         };
 
-        // עוזר לקבלת תאריך/זמן בפורמט מקומי של ישראל
         const getIsraelTime = (dateObj = new Date(), includeTime = true) => {
             const options = {
                 timeZone: 'Asia/Jerusalem',
@@ -74,13 +73,11 @@
             const [message, setMessage] = useState(null);
             const [showClearConfirm, setShowClearConfirm] = useState(false);
 
-            // אתחול הגדרות ללא ערכים קשיחים
             const [settings, setSettings] = useState(() => {
                 if (window.APP_CONFIG) return window.APP_CONFIG;
                 return { target: 0, scriptUrl: '', sheetUrl: '' };
             });
 
-            // Form State - אתחול לפי ישראל
             const [amount, setAmount] = useState('');
             const [method, setMethod] = useState('bit');
             const [date, setDate] = useState(() => getIsraelTime(new Date(), false));
@@ -179,139 +176,133 @@
                     try {
                         await fetch(settings.scriptUrl, { method: 'POST', mode: 'no-cors', body: JSON.stringify(newEntry) });
                         setTimeout(() => syncWithSheet(settings.scriptUrl), 1500);
-                        setMessage({ text: 'נשמר בגיליון!' });
+                        setMessage({ text: 'Saved to Sheet!' });
                     } catch (err) {
-                        setMessage({ text: 'נשמר מקומית (שגיאת חיבור)' });
+                        setMessage({ text: 'Saved locally (Error)' });
                     }
                 } else {
                     localStorage.setItem('income_entries', JSON.stringify(updated));
-                    setMessage({ text: 'נשמר במכשיר' });
+                    setMessage({ text: 'Saved locally' });
                 }
 
                 setAmount('');
                 setTimeout(() => setMessage(null), 3000);
             };
 
-            const clearView = () => {
-                setEntries([]);
-                localStorage.setItem('income_entries', JSON.stringify([]));
-                setShowClearConfirm(false);
-                setMessage({ text: 'התצוגה נוקתה' });
-                setTimeout(() => setMessage(null), 3000);
-            };
-
             return (
-                <div className="min-h-screen bg-slate-50 flex flex-col">
-                    <header className="bg-white px-5 py-4 border-b sticky top-0 z-10 shadow-sm flex justify-between items-center max-w-md mx-auto w-full">
-                        <div className="flex items-center gap-3">
-                            <div className={`p-2 rounded-xl ${settings.scriptUrl ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-50 text-slate-400'}`}>
-                                <Icon name="database" size={18} strokeWidth={2.5} />
-                            </div>
-                            <div>
-                                <h1 className="text-xl font-black text-slate-800 tracking-tight leading-none">הכנסות פלוס</h1>
-                                <p className="text-[10px] text-slate-400 font-bold uppercase mt-1">ניהול משותף</p>
-                            </div>
+                <div className="app-container">
+                    {/* Header - Fixed Height */}
+                    <header className="bg-white px-4 py-3 border-b flex justify-between items-center max-w-md mx-auto w-full flex-shrink-0">
+                        <div className="flex items-center gap-2">
+                            <Icon name="database" size={16} className={settings.scriptUrl ? "text-emerald-500" : "text-slate-300"} />
+                            <h1 className="text-lg font-black text-slate-800 leading-none">הכנסות פלוס</h1>
                         </div>
                         <button 
                             onClick={() => syncWithSheet(settings.scriptUrl)} 
-                            className={`p-2 bg-slate-50 rounded-full text-slate-400 transition-all active:scale-90 ${isSyncing ? 'animate-spin text-blue-500' : ''}`}
+                            className={`p-1.5 bg-slate-50 rounded-full text-slate-400 transition-all active:scale-90 ${isSyncing ? 'animate-spin text-blue-500' : ''}`}
                         >
-                            <Icon name="refresh-cw" size={20} />
+                            <Icon name="refresh-cw" size={18} />
                         </button>
                     </header>
 
-                    <main className="max-w-md mx-auto w-full p-4 space-y-4 flex-1 overflow-y-auto pb-32 text-right">
+                    {/* Main Content - Flexible */}
+                    <main className="max-w-md mx-auto w-full p-3 space-y-3 flex-1 overflow-y-auto pb-24 text-right">
                         {message && (
-                            <div className="bg-slate-900 text-white p-3 rounded-xl text-center font-bold text-sm shadow-xl animate-in slide-in-from-top duration-300">
+                            <div className="bg-slate-900 text-white p-2 rounded-lg text-center font-bold text-xs shadow-lg animate-in slide-in-from-top duration-300">
                                 {String(message.text)}
                             </div>
                         )}
 
                         {view === 'input' && (
-                            <div className="space-y-4 animate-in fade-in duration-500">
-                                <div className="bg-white p-6 rounded-[2.5rem] shadow-xl shadow-slate-200/50 border border-white">
-                                    <form onSubmit={handleSaveEntry} className="space-y-6">
-                                        <div className="text-center space-y-1">
+                            <div className="space-y-3 animate-in fade-in duration-500">
+                                {/* Input Card - Ultra Compact */}
+                                <div className="bg-white p-4 rounded-[2rem] shadow-lg border border-white">
+                                    <form onSubmit={handleSaveEntry} className="space-y-4">
+                                        <div className="text-center space-y-0.5">
                                             <label className="text-[10px] font-black text-slate-300 uppercase tracking-widest leading-none">כמה נכנס?</label>
                                             <input 
                                                 type="number" inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value)}
-                                                placeholder="₪0" className="w-full text-5xl font-black p-2 bg-transparent text-center outline-none placeholder-slate-100 text-slate-800" required
+                                                placeholder="₪0" className="w-full text-4xl font-black p-0.5 bg-transparent text-center outline-none placeholder-slate-100 text-slate-800" required
                                             />
                                         </div>
                                         <div className="grid grid-cols-2 gap-2">
                                             {PAYMENT_METHODS.map(m => (
-                                                <button key={m.id} type="button" onClick={() => setMethod(m.id)} className={`p-4 rounded-2xl text-xs font-black transition-all ${method === m.id ? 'bg-blue-600 text-white shadow-lg scale-105' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}>
+                                                <button key={m.id} type="button" onClick={() => setMethod(m.id)} className={`py-2 px-1 rounded-xl text-[11px] font-black transition-all ${method === m.id ? 'bg-blue-600 text-white shadow-md scale-[1.02]' : 'bg-slate-50 text-slate-400'}`}>
                                                     {String(m.label)}
                                                 </button>
                                             ))}
                                         </div>
                                         <div className="relative">
-                                            <input type="date" value={date} onChange={e => setDate(e.target.value)} className="w-full p-4 bg-slate-50 rounded-2xl text-right pr-12 font-bold text-slate-600 outline-none border-2 border-transparent focus:border-blue-100 transition-all" />
-                                            <Icon name="calendar" className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300" size={20} />
+                                            <input type="date" value={date} onChange={e => setDate(e.target.value)} className="w-full p-2.5 bg-slate-50 rounded-xl text-right pr-10 font-bold text-slate-600 text-sm outline-none border border-transparent focus:border-blue-100" />
+                                            <div className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300">
+                                                <Icon name="calendar" size={16} />
+                                            </div>
                                         </div>
-                                        <button className="w-full bg-slate-900 text-white font-black py-5 rounded-2xl shadow-xl active:scale-95 transition-all flex justify-center items-center gap-2">
-                                            <Icon name="save" size={20} /> שמור בגיליון
+                                        <button className="w-full bg-slate-900 text-white font-black py-3 rounded-2xl shadow-xl active:scale-95 transition-all flex justify-center items-center gap-2 text-sm">
+                                            <Icon name="save" size={18} /> שמור בגיליון
                                         </button>
                                     </form>
                                 </div>
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div className="bg-emerald-50 p-5 rounded-[2rem] text-center border border-emerald-100">
-                                        <p className="text-emerald-600 text-[10px] font-black uppercase tracking-wider mb-1">סה"כ החודש</p>
-                                        <p className="text-emerald-700 text-2xl font-black leading-none">₪{Number(stats.totalActual).toLocaleString()}</p>
+
+                                {/* Summary Grid - Tight padding */}
+                                <div className="grid grid-cols-2 gap-2">
+                                    <div className="bg-emerald-50 p-3 rounded-2xl border border-emerald-100 text-center">
+                                        <p className="text-emerald-600 text-[9px] font-black uppercase tracking-wider mb-0.5">סה"כ החודש</p>
+                                        <p className="text-emerald-700 text-lg font-black leading-tight">₪{Number(stats.totalActual).toLocaleString()}</p>
                                     </div>
-                                    <div className="bg-blue-50 p-5 rounded-[2rem] text-center border border-blue-100">
-                                        <p className="text-blue-600 text-[10px] font-black uppercase tracking-wider mb-1">צפי לסוף חודש</p>
-                                        <p className="text-blue-700 text-2xl font-black leading-none">₪{Math.round(Number(stats.projection)).toLocaleString()}</p>
+                                    <div className="bg-blue-50 p-3 rounded-2xl border border-blue-100 text-center">
+                                        <p className="text-blue-600 text-[9px] font-black uppercase tracking-wider mb-0.5">צפי לסוף חודש</p>
+                                        <p className="text-blue-700 text-lg font-black leading-tight">₪{Math.round(Number(stats.projection)).toLocaleString()}</p>
                                     </div>
                                 </div>
                             </div>
                         )}
 
                         {view === 'dashboard' && (
-                            <div className="space-y-5 animate-in fade-in duration-500">
-                                <div className="bg-white p-7 rounded-[2.5rem] shadow-lg border border-slate-50">
-                                    <div className={`p-6 rounded-[2rem] mb-6 ${stats.diff >= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'} border`}>
-                                        <p className="text-[10px] font-black uppercase tracking-widest opacity-60 mb-1">ביצוע מול יעד נוכחי</p>
-                                        <p className="text-4xl font-black leading-none">{stats.diff >= 0 ? '+' : ''}₪{Math.round(Math.abs(stats.diff)).toLocaleString()}</p>
-                                        <p className="text-[10px] font-bold mt-4 text-slate-500 uppercase tracking-tighter">יום עבודה {Number(stats.passedWorkdays)} מתוך {Number(stats.totalWorkdaysInMonth)}</p>
+                            <div className="space-y-4 animate-in fade-in duration-500">
+                                <div className="bg-white p-5 rounded-3xl shadow-md border border-slate-50">
+                                    <div className={`p-4 rounded-2xl mb-4 ${stats.diff >= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'} border`}>
+                                        <p className="text-[9px] font-black uppercase opacity-60 mb-1">ביצוע מול יעד נוכחי</p>
+                                        <p className="text-3xl font-black leading-none">{stats.diff >= 0 ? '+' : ''}₪{Math.round(Math.abs(stats.diff)).toLocaleString()}</p>
+                                        <p className="text-[9px] font-bold mt-2 text-slate-500">יום עבודה {Number(stats.passedWorkdays)} מתוך {Number(stats.totalWorkdaysInMonth)}</p>
                                     </div>
-                                    <div className="space-y-3 px-1">
-                                        <div className="flex justify-between text-xs font-black text-slate-400">
+                                    <div className="space-y-1.5">
+                                        <div className="flex justify-between text-[9px] font-black text-slate-400">
                                             <span>יעד: ₪{Number(settings.target).toLocaleString()}</span>
                                             <span>{Math.round(Number(stats.percentage))}%</span>
                                         </div>
-                                        <div className="h-3 bg-slate-100 rounded-full overflow-hidden shadow-inner">
+                                        <div className="h-2 bg-slate-100 rounded-full overflow-hidden shadow-inner">
                                             <div style={{width: `${Math.min(stats.percentage, 100)}%`}} className="h-full bg-blue-500 transition-all duration-1000"></div>
                                         </div>
                                     </div>
                                 </div>
 
-                                <div className="bg-white p-6 rounded-[2.5rem] shadow-lg border border-slate-50">
-                                    <div className="flex justify-between items-center mb-5">
+                                <div className="bg-white p-4 rounded-3xl shadow-md border border-slate-50">
+                                    <div className="flex justify-between items-center mb-3">
                                         {!showClearConfirm ? (
-                                            <button onClick={() => setShowClearConfirm(true)} className="p-2 text-slate-200 hover:text-rose-500 transition-colors"><Icon name="trash-2" size={20} /></button>
+                                            <button onClick={() => setShowClearConfirm(true)} className="p-1 text-slate-200 hover:text-rose-500"><Icon name="trash-2" size={16} /></button>
                                         ) : (
                                             <div className="flex gap-2">
-                                                <button onClick={clearView} className="bg-rose-500 text-white text-[10px] px-3 py-1.5 rounded-xl font-bold uppercase">מחק</button>
-                                                <button onClick={() => setShowClearConfirm(false)} className="bg-slate-100 text-slate-400 text-[10px] px-3 py-1.5 rounded-xl font-bold uppercase">בטל</button>
+                                                <button onClick={() => { setEntries([]); setShowClearConfirm(false); }} className="bg-rose-500 text-white text-[8px] px-2 py-1 rounded font-black">מחק</button>
+                                                <button onClick={() => setShowClearConfirm(false)} className="bg-slate-100 text-slate-400 text-[8px] px-2 py-1 rounded font-black">בטל</button>
                                             </div>
                                         )}
-                                        <h3 className="font-black text-slate-800 text-sm uppercase tracking-widest">פעולות אחרונות</h3>
+                                        <h3 className="font-black text-slate-800 text-[10px] uppercase">פעולות אחרונות</h3>
                                     </div>
-                                    <div className="space-y-3">
+                                    <div className="space-y-2">
                                         {stats.monthlyEntries.length === 0 ? (
-                                            <p className="text-center text-slate-300 text-xs py-10 italic border-2 border-dashed border-slate-50 rounded-3xl">אין נתונים להצגה (נסה לרענן)</p>
+                                            <p className="text-center text-slate-300 text-[10px] py-4 italic">אין נתונים</p>
                                         ) : (
                                             stats.monthlyEntries.slice(0, 10).map(e => (
-                                                <div key={e.id} className="flex justify-between items-center p-4 bg-slate-50 rounded-2xl border border-white shadow-sm">
-                                                    <div className="flex items-center gap-3">
-                                                        <div className={`w-2.5 h-2.5 rounded-full ${PAYMENT_METHODS.find(m => m.id === e.method)?.color || 'bg-slate-300'}`}></div>
+                                                <div key={e.id} className="flex justify-between items-center p-2.5 bg-slate-50 rounded-xl border border-white">
+                                                    <div className="flex items-center gap-2">
+                                                        <div className={`w-2 h-2 rounded-full ${PAYMENT_METHODS.find(m => m.id === e.method)?.color || 'bg-slate-300'}`}></div>
                                                         <div>
-                                                            <p className="text-base font-black text-slate-800">₪{Number(e.amount).toLocaleString()}</p>
-                                                            <p className="text-[10px] font-bold text-slate-400 uppercase">{String(e.date).split('-').reverse().join('/')}</p>
+                                                            <p className="text-sm font-black text-slate-800 leading-none">₪{Number(e.amount).toLocaleString()}</p>
+                                                            <p className="text-[8px] font-bold text-slate-400 uppercase mt-1">{String(e.date).split('-').reverse().join('/')}</p>
                                                         </div>
                                                     </div>
-                                                    <span className="text-[10px] font-black bg-white px-3 py-1.5 rounded-full border text-slate-500 shadow-sm">{String(PAYMENT_METHODS.find(m => m.id === e.method)?.label || '')}</span>
+                                                    <span className="text-[8px] font-black bg-white px-2 py-0.5 rounded-md border text-slate-400 uppercase tracking-tighter">{String(PAYMENT_METHODS.find(m => m.id === e.method)?.label || '')}</span>
                                                 </div>
                                             ))
                                         )}
@@ -321,24 +312,25 @@
                         )}
                     </main>
 
-                    <nav className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-xl border-t p-4 pb-10 flex justify-around max-w-md mx-auto shadow-2xl rounded-t-[2.5rem] z-20">
-                        <button onClick={() => setView('input')} className={`flex flex-col items-center gap-1.5 transition-all ${view === 'input' ? 'text-blue-600 scale-110 font-black' : 'text-slate-300'}`}>
-                            <Icon name="plus-circle" size={28} strokeWidth={view === 'input' ? 3 : 2} />
-                            <p className="text-[10px] uppercase tracking-widest font-bold">הזנה</p>
+                    {/* Navbar - Fixed Height */}
+                    <nav className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-xl border-t p-3 pb-6 flex justify-around max-w-md mx-auto shadow-2xl rounded-t-[2rem] z-20 flex-shrink-0">
+                        <button onClick={() => setView('input')} className={`flex flex-col items-center gap-1 transition-all ${view === 'input' ? 'text-blue-600 scale-105 font-black' : 'text-slate-300'}`}>
+                            <Icon name="plus-circle" size={24} strokeWidth={view === 'input' ? 3 : 2} />
+                            <p className="text-[9px] uppercase font-bold">הזנה</p>
                         </button>
-                        <button onClick={() => setView('dashboard')} className={`flex flex-col items-center gap-1.5 transition-all ${view === 'dashboard' ? 'text-blue-600 scale-110 font-black' : 'text-slate-300'}`}>
-                            <Icon name="layout-dashboard" size={28} strokeWidth={view === 'dashboard' ? 3 : 2} />
-                            <p className="text-[10px] uppercase tracking-widest font-bold">ניתוח</p>
+                        <button onClick={() => setView('dashboard')} className={`flex flex-col items-center gap-1 transition-all ${view === 'dashboard' ? 'text-blue-600 scale-105 font-black' : 'text-slate-300'}`}>
+                            <Icon name="layout-dashboard" size={24} strokeWidth={view === 'dashboard' ? 3 : 2} />
+                            <p className="text-[9px] uppercase font-bold">ניתוח</p>
                         </button>
                         <a 
                             href={settings.sheetUrl || '#'} 
                             target={settings.sheetUrl ? "_blank" : "_self"} 
                             rel="noopener noreferrer" 
-                            className={`flex flex-col items-center gap-1.5 transition-all ${settings.sheetUrl ? 'text-slate-400 hover:text-emerald-600' : 'text-slate-300'}`}
+                            className={`flex flex-col items-center gap-1 transition-all ${settings.sheetUrl ? 'text-slate-400 hover:text-emerald-600' : 'text-slate-200'}`}
                             onClick={(e) => { if(!settings.sheetUrl) e.preventDefault(); }}
                         >
-                            <Icon name="table" size={28} />
-                            <p className="text-[10px] uppercase tracking-widest font-bold">טבלה</p>
+                            <Icon name="table" size={24} />
+                            <p className="text-[9px] uppercase font-bold">טבלה</p>
                         </a>
                     </nav>
                 </div>
