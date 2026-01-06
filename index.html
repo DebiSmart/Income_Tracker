@@ -1,335 +1,392 @@
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { 
+  PlusCircle, 
+  Database, 
+  RefreshCw, 
+  Save, 
+  Calendar, 
+  Trash2, 
+  LayoutDashboard, 
+  Table,
+  CheckCircle2,
+  AlertCircle
+} from 'lucide-react';
 
-<!DOCTYPE html>
-<html lang="he" dir="rtl">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>הכנסות פלוס - ניהול נקי</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <!-- טעינת קובץ ההגדרות מ-GitHub -->
-    <script src="config.js"></script>
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Assistant:wght@300;400;700;800&display=swap" rel="stylesheet">
-    <style>
-        body { font-family: 'Assistant', sans-serif; background-color: #f8fafc; overflow-x: hidden; }
-        input[type="date"]::-webkit-calendar-picker-indicator {
-            background: transparent; bottom: 0; color: transparent; cursor: pointer;
-            height: auto; left: 0; position: absolute; right: 0; top: 0; width: auto;
-        }
-        .dir-ltr { direction: ltr; }
-        @keyframes chart-draw { from { stroke-dasharray: 1000; stroke-dashoffset: 1000; } to { stroke-dashoffset: 0; } }
-        .animate-chart-draw { animation: chart-draw 2s ease-out forwards; }
-        /* מניעת גלילה מיותרת במובייל */
-        .main-container { min-height: calc(100vh - 140px); }
-    </style>
-</head>
-<body>
-    <div id="root"></div>
+// --- Constants ---
+const PAYMENT_METHODS = [
+  { id: 'paybox', label: 'פייבוקס', color: 'bg-blue-500' },
+  { id: 'bit', label: 'ביט', color: 'bg-purple-500' },
+  { id: 'cash', label: 'מזומן', color: 'bg-green-600' },
+  { id: 'paybox2', label: 'פייבוקס 2', color: 'bg-blue-700' },
+  { id: 'bit2', label: 'ביט 2', color: 'bg-purple-700' },
+];
 
-    <script type="text/babel">
-        const { useState, useEffect, useMemo, useCallback } = React;
+const isWorkday = (year, month, day) => {
+  const date = new Date(year, month, day);
+  const dayOfWeek = date.getDay(); // 0 = Sun, 5 = Fri, 6 = Sat
+  return dayOfWeek !== 5 && dayOfWeek !== 6;
+};
 
-        const Icon = ({ name, size = 24, className = "" }) => {
-            useEffect(() => { if (window.lucide) lucide.createIcons(); }, [name]);
-            return <i data-lucide={name} style={{ width: size, height: size }} className={className}></i>;
-        };
+export default function App() {
+  const [view, setView] = useState('input');
+  const [entries, setEntries] = useState([]);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [message, setMessage] = useState(null);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
 
-        const PAYMENT_METHODS = [
-            { id: 'paybox', label: 'פייבוקס', color: 'bg-blue-500' },
-            { id: 'bit', label: 'ביט', color: 'bg-purple-500' },
-            { id: 'cash', label: 'מזומן', color: 'bg-green-600' },
-            { id: 'paybox2', label: 'פייבוקס 2', color: 'bg-blue-700' },
-            { id: 'bit2', label: 'ביט 2', color: 'bg-purple-700' },
-        ];
+  // הגדרות ראשוניות מ-window.APP_CONFIG (עבור GitHub) או LocalStorage
+  const [settings, setSettings] = useState(() => {
+    if (typeof window !== 'undefined' && window.APP_CONFIG) {
+      return {
+        target: Number(window.APP_CONFIG.target) || 0,
+        scriptUrl: window.APP_CONFIG.scriptUrl || '',
+        sheetUrl: window.APP_CONFIG.sheetUrl || ''
+      };
+    }
+    return { target: 0, scriptUrl: '', sheetUrl: '' };
+  });
 
-        const isWorkday = (year, month, day) => {
-            const date = new Date(year, month, day);
-            const dayOfWeek = date.getDay(); 
-            return dayOfWeek !== 5 && dayOfWeek !== 6;
-        };
+  // State של הטופס
+  const [amount, setAmount] = useState('');
+  const [method, setMethod] = useState('bit');
+  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
 
-        function App() {
-            const [view, setView] = useState('input');
-            const [entries, setEntries] = useState([]);
-            const [settings, setSettings] = useState({ target: 15000, scriptUrl: '', sheetUrl: '' });
-            const [isSyncing, setIsSyncing] = useState(true);
-            const [message, setMessage] = useState(null);
-            const [showClearConfirm, setShowClearConfirm] = useState(false);
+  // הזרקת סגנונות גלובליים לשיפור התצוגה במובייל
+  useEffect(() => {
+    const style = document.createElement('style');
+    style.innerHTML = `
+      @import url('https://fonts.googleapis.com/css2?family=Assistant:wght@300;400;700;800&display=swap');
+      body { font-family: 'Assistant', sans-serif; background-color: #f8fafc; }
+      input[type="date"]::-webkit-calendar-picker-indicator {
+        background: transparent; bottom: 0; color: transparent; cursor: pointer;
+        height: auto; left: 0; position: absolute; right: 0; top: 0; width: auto;
+      }
+      .custom-shadow { box-shadow: 0 10px 40px -10px rgba(0,0,0,0.05); }
+      @keyframes slideIn { from { transform: translateY(-10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+      .animate-slide { animation: slideIn 0.3s ease-out forwards; }
+    `;
+    document.head.appendChild(style);
+    return () => document.head.removeChild(style);
+  }, []);
 
-            const [amount, setAmount] = useState('');
-            const [method, setMethod] = useState('bit');
-            const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  // פונקציית סנכרון מול הגיליון
+  const syncWithSheet = useCallback(async (url) => {
+    if (!url || !url.startsWith('http')) return;
+    setIsSyncing(true);
+    try {
+      const response = await fetch(url);
+      const data = await response.json();
+      if (Array.isArray(data)) {
+        const formattedData = data.map(item => ({
+          id: item.id || Math.random(),
+          amount: Number(item.amount),
+          date: String(item.date),
+          method: String(item.method || 'bit')
+        })).sort((a, b) => new Date(b.date) - new Date(a.date));
+        
+        setEntries(formattedData);
+        localStorage.setItem('income_entries', JSON.stringify(formattedData));
+      }
+    } catch (err) {
+      console.error("Sync error:", err);
+    } finally {
+      setIsSyncing(false);
+    }
+  }, []);
 
-            const syncWithSheet = useCallback(async (url) => {
-                if (!url || !url.startsWith('http')) {
-                    setIsSyncing(false);
-                    return;
-                }
-                setIsSyncing(true);
-                try {
-                    const response = await fetch(url);
-                    const data = await response.json();
-                    if (Array.isArray(data)) {
-                        const formattedData = data.map(item => ({
-                            id: item.id || Math.random(),
-                            amount: Number(item.amount),
-                            date: String(item.date),
-                            method: String(item.method || 'bit')
-                        })).sort((a, b) => new Date(b.date) - new Date(a.date));
-                        
-                        setEntries(formattedData);
-                        localStorage.setItem('income_entries', JSON.stringify(formattedData));
-                    }
-                } catch (err) {
-                    console.error("Sheet sync error:", err);
-                } finally {
-                    setIsSyncing(false);
-                }
-            }, []);
+  // אתחול בטעינה
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.APP_CONFIG) {
+      setSettings(window.APP_CONFIG);
+      if (window.APP_CONFIG.scriptUrl) syncWithSheet(window.APP_CONFIG.scriptUrl);
+    } else {
+      const savedEntries = localStorage.getItem('income_entries');
+      if (savedEntries) setEntries(JSON.parse(savedEntries));
+    }
+  }, [syncWithSheet]);
 
-            useEffect(() => {
-                if (window.APP_CONFIG) {
-                    setSettings(window.APP_CONFIG);
-                    if (window.APP_CONFIG.scriptUrl) {
-                        syncWithSheet(window.APP_CONFIG.scriptUrl);
-                    } else {
-                        setIsSyncing(false);
-                    }
-                } else {
-                    const savedEntries = localStorage.getItem('income_entries');
-                    if (savedEntries) setEntries(JSON.parse(savedEntries));
-                    setIsSyncing(false);
-                }
-            }, [syncWithSheet]);
+  // חישובי סטטיסטיקה
+  const stats = useMemo(() => {
+    const now = new Date();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
+    const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+    const dayOfMonth = now.getDate();
 
-            const stats = useMemo(() => {
-                const now = new Date();
-                const currentMonth = now.getMonth();
-                const currentYear = now.getFullYear();
-                const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
-                const dayOfMonth = now.getDate();
+    let totalWorkdaysInMonth = 0;
+    let passedWorkdays = 0;
+    for (let d = 1; d <= daysInMonth; d++) {
+      if (isWorkday(currentYear, currentMonth, d)) {
+        totalWorkdaysInMonth++;
+        if (d <= dayOfMonth) passedWorkdays++;
+      }
+    }
 
-                let totalWorkdaysInMonth = 0;
-                let passedWorkdays = 0;
-                for (let d = 1; d <= daysInMonth; d++) {
-                    if (isWorkday(currentYear, currentMonth, d)) {
-                        totalWorkdaysInMonth++;
-                        if (d <= dayOfMonth) passedWorkdays++;
-                    }
-                }
+    const monthlyEntries = entries.filter(e => {
+      const eDate = new Date(e.date);
+      return eDate.getMonth() === currentMonth && eDate.getFullYear() === currentYear;
+    });
 
-                const monthlyEntries = entries.filter(e => {
-                    const eDate = new Date(e.date);
-                    return eDate.getMonth() === currentMonth && eDate.getFullYear() === currentYear;
-                });
+    const totalActual = monthlyEntries.reduce((sum, e) => sum + Number(e.amount || 0), 0);
+    const safeTarget = Number(settings.target) || 0;
+    const targetPerWorkday = safeTarget / (totalWorkdaysInMonth || 1);
+    const targetToDate = targetPerWorkday * passedWorkdays;
+    const projection = passedWorkdays > 0 ? (totalActual / passedWorkdays) * totalWorkdaysInMonth : 0;
+    const diff = totalActual - targetToDate;
 
-                const totalActual = monthlyEntries.reduce((sum, e) => sum + Number(e.amount || 0), 0);
-                const safeTarget = Number(settings.target) || 15000;
-                const targetPerWorkday = safeTarget / (totalWorkdaysInMonth || 1);
-                const targetToDate = targetPerWorkday * passedWorkdays;
-                const projection = passedWorkdays > 0 ? (totalActual / passedWorkdays) * totalWorkdaysInMonth : 0;
-                const diff = totalActual - targetToDate;
+    return { 
+      totalActual, 
+      targetToDate, 
+      projection, 
+      diff, 
+      percentage: safeTarget > 0 ? (totalActual / safeTarget) * 100 : 0, 
+      passedWorkdays, 
+      totalWorkdaysInMonth,
+      monthlyEntries
+    };
+  }, [entries, settings]);
 
-                return { totalActual, targetToDate, projection, diff, percentage: safeTarget > 0 ? (totalActual / safeTarget) * 100 : 0, passedWorkdays, totalWorkdaysInMonth, monthlyEntries };
-            }, [entries, settings]);
+  const handleSaveEntry = async (e) => {
+    e.preventDefault();
+    if (!amount) return;
 
-            const handleSaveEntry = async (e) => {
-                e.preventDefault();
-                if (!amount) return;
+    // זמן ישראל (Asia/Jerusalem) - עובד גם בקיץ וגם בחורף
+    const now = new Date();
+    const timestampFormatted = now.toLocaleString('sv-SE', { timeZone: 'Asia/Jerusalem' }).replace('T', ' ');
 
-                const newEntry = {
-                    amount: Number(amount),
-                    method: String(method),
-                    date: String(date),
-                    timestamp: new Date().toISOString()
-                };
+    const newEntry = {
+      amount: Number(amount),
+      method: String(method),
+      date: String(date),
+      timestamp: timestampFormatted
+    };
 
-                const updated = [ { ...newEntry, id: Date.now() }, ...entries ];
-                setEntries(updated);
+    // עדכון מקומי אופטימי
+    const updated = [ { ...newEntry, id: Date.now() }, ...entries ];
+    setEntries(updated);
 
-                if (settings.scriptUrl) {
-                    setIsSyncing(true);
-                    try {
-                        await fetch(settings.scriptUrl, { method: 'POST', mode: 'no-cors', body: JSON.stringify(newEntry) });
-                        setTimeout(() => syncWithSheet(settings.scriptUrl), 1500);
-                        setMessage({ text: 'נשלח לגיליון!' });
-                    } catch (err) {
-                        setMessage({ text: 'נשמר רק מקומית' });
-                    }
-                } else {
-                    localStorage.setItem('income_entries', JSON.stringify(updated));
-                    setMessage({ text: 'נשמר במכשיר' });
-                }
+    if (settings.scriptUrl) {
+      setIsSyncing(true);
+      try {
+        await fetch(settings.scriptUrl, { method: 'POST', mode: 'no-cors', body: JSON.stringify(newEntry) });
+        setTimeout(() => syncWithSheet(settings.scriptUrl), 1500);
+        setMessage({ text: 'ההכנסה נשמרה בגיליון!', type: 'success' });
+      } catch (err) {
+        setMessage({ text: 'נשמר מקומית בלבד', type: 'error' });
+      }
+    } else {
+      localStorage.setItem('income_entries', JSON.stringify(updated));
+      setMessage({ text: 'נשמר במכשיר', type: 'info' });
+    }
 
-                setAmount('');
-                setTimeout(() => setMessage(null), 3000);
-            };
+    setAmount('');
+    setTimeout(() => setMessage(null), 3000);
+  };
 
-            const clearView = () => {
-                setEntries([]);
-                setShowClearConfirm(false);
-                setMessage({ text: 'התצוגה נוקתה' });
-                setTimeout(() => setMessage(null), 3000);
-            };
+  return (
+    <div className="min-h-screen bg-slate-50 flex flex-col font-sans overflow-x-hidden" dir="rtl" style={{ fontFamily: 'Assistant, sans-serif' }}>
+      {/* Header */}
+      <header className="bg-white px-6 py-4 border-b sticky top-0 z-20 flex justify-between items-center max-w-md mx-auto w-full shadow-sm">
+        <div className="flex items-center gap-3">
+          <div className={`p-2 rounded-xl ${settings.scriptUrl ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-50 text-slate-400'}`}>
+            <Database size={20} strokeWidth={2.5} />
+          </div>
+          <div>
+            <h1 className="text-xl font-black text-slate-800 tracking-tight leading-tight">הכנסות פלוס</h1>
+            <div className="flex items-center gap-1">
+              <div className={`w-1.5 h-1.5 rounded-full ${settings.scriptUrl ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`}></div>
+              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">סנכרון ענן</p>
+            </div>
+          </div>
+        </div>
+        <button 
+          onClick={() => syncWithSheet(settings.scriptUrl)} 
+          className={`p-2.5 bg-slate-50 rounded-full text-slate-500 transition-all active:scale-90 ${isSyncing ? 'animate-spin text-blue-500' : ''}`}
+        >
+          <RefreshCw size={20} strokeWidth={2.5} />
+        </button>
+      </header>
 
-            return (
-                <div className="min-h-screen bg-slate-50 flex flex-col">
-                    {/* Header - Compact */}
-                    <header className="bg-white px-4 py-3 border-b sticky top-0 z-10 shadow-sm flex justify-between items-center max-w-md mx-auto w-full">
-                        <div className="flex items-center gap-2">
-                            <Icon name="database" size={16} className={settings.scriptUrl ? "text-emerald-500" : "text-slate-300"} />
-                            <h1 className="text-lg font-black text-slate-800 tracking-tight leading-none">הכנסות פלוס</h1>
-                        </div>
-                        <button 
-                            onClick={() => syncWithSheet(settings.scriptUrl)} 
-                            className={`p-1.5 bg-slate-50 rounded-full text-slate-400 transition-all active:scale-90 ${isSyncing ? 'animate-spin text-blue-500' : ''}`}
-                        >
-                            <Icon name="refresh-cw" size={18} />
-                        </button>
-                    </header>
+      <main className="max-w-md mx-auto w-full p-4 space-y-4 flex-1 overflow-y-auto pb-32 text-right">
+        {message && (
+          <div className={`p-3 rounded-xl text-center font-bold text-sm shadow-xl animate-slide flex items-center justify-center gap-2 ${
+            message.type === 'error' ? 'bg-rose-500 text-white' : 'bg-slate-900 text-white'
+          }`}>
+            {message.type === 'success' ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
+            {String(message.text)}
+          </div>
+        )}
 
-                    <main className="max-w-md mx-auto w-full p-3 space-y-3 text-right flex-1 overflow-y-auto pb-24">
-                        {message && (
-                            <div className="bg-slate-900 text-white p-2 rounded-lg text-center font-bold text-xs shadow-lg animate-in slide-in-from-top duration-300">
-                                {String(message.text)}
-                            </div>
-                        )}
-
-                        {view === 'input' && (
-                            <div className="space-y-3 animate-in fade-in duration-500">
-                                {/* Input Card - Compact Version */}
-                                <div className="bg-white p-4 rounded-3xl shadow-lg shadow-slate-200/50 border border-white">
-                                    <form onSubmit={handleSaveEntry} className="space-y-4">
-                                        <div className="text-center">
-                                            <label className="text-[9px] font-black text-slate-300 uppercase tracking-widest block mb-1">כמה נכנס?</label>
-                                            <input 
-                                                type="number" inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value)}
-                                                placeholder="₪0" className="w-full text-4xl font-black p-1 bg-transparent text-center outline-none placeholder-slate-100 text-slate-800" required
-                                            />
-                                        </div>
-                                        
-                                        <div className="grid grid-cols-2 gap-2">
-                                            {PAYMENT_METHODS.map(m => (
-                                                <button key={m.id} type="button" onClick={() => setMethod(m.id)} className={`py-2 px-1 rounded-xl text-[11px] font-black transition-all ${method === m.id ? 'bg-blue-600 text-white shadow-md scale-[1.02]' : 'bg-slate-50 text-slate-400'}`}>
-                                                    {String(m.label)}
-                                                </button>
-                                            ))}
-                                        </div>
-
-                                        <div className="relative">
-                                            <input type="date" value={date} onChange={e => setDate(e.target.value)} className="w-full p-2.5 bg-slate-50 rounded-xl text-right pr-10 font-bold text-slate-600 text-sm outline-none border border-transparent focus:border-blue-100" />
-                                            <div className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300">
-                                                <Icon name="calendar" size={16} />
-                                            </div>
-                                        </div>
-
-                                        <button className="w-full bg-slate-900 text-white font-black py-3.5 rounded-2xl shadow-xl active:scale-95 transition-all flex justify-center items-center gap-2 text-sm">
-                                            <Icon name="save" size={18} /> שמור בגיליון
-                                        </button>
-                                    </form>
-                                </div>
-
-                                {/* Compact Summary Grid */}
-                                <div className="grid grid-cols-2 gap-2">
-                                    <div className="bg-emerald-50 p-3 rounded-2xl border border-emerald-100 text-center">
-                                        <p className="text-emerald-600 text-[9px] font-black uppercase tracking-wider mb-0.5">סה"כ החודש</p>
-                                        <p className="text-emerald-700 text-lg font-black leading-tight">₪{Number(stats.totalActual).toLocaleString()}</p>
-                                    </div>
-                                    <div className="bg-blue-50 p-3 rounded-2xl border border-blue-100 text-center">
-                                        <p className="text-blue-600 text-[9px] font-black uppercase tracking-wider mb-0.5">צפי לסוף חודש</p>
-                                        <p className="text-blue-700 text-lg font-black leading-tight">₪{Math.round(Number(stats.projection)).toLocaleString()}</p>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-
-                        {view === 'dashboard' && (
-                            <div className="space-y-4 animate-in fade-in duration-500">
-                                <div className="bg-white p-5 rounded-3xl shadow-md border border-slate-50">
-                                    <div className={`p-4 rounded-2xl mb-4 ${stats.diff >= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'} border`}>
-                                        <p className="text-[9px] font-black uppercase tracking-widest opacity-60 leading-none mb-1">ביצוע מול יעד נוכחי</p>
-                                        <p className="text-3xl font-black leading-none">{stats.diff >= 0 ? '+' : ''}₪{Math.round(Math.abs(stats.diff)).toLocaleString()}</p>
-                                        <p className="text-[9px] font-bold mt-2 text-slate-500">יום עבודה {Number(stats.passedWorkdays)} מתוך {Number(stats.totalWorkdaysInMonth)}</p>
-                                    </div>
-                                    <div className="space-y-1.5 px-0.5">
-                                        <div className="flex justify-between text-[9px] font-black text-slate-400 uppercase tracking-tighter">
-                                            <span>יעד: ₪{Number(settings.target).toLocaleString()}</span>
-                                            <span>{Math.round(Number(stats.percentage))}%</span>
-                                        </div>
-                                        <div className="h-2 bg-slate-100 rounded-full overflow-hidden shadow-inner">
-                                            <div style={{width: `${Math.min(stats.percentage, 100)}%`}} className="h-full bg-blue-500 transition-all duration-1000"></div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div className="bg-white p-4 rounded-3xl shadow-md border border-slate-50">
-                                    <div className="flex justify-between items-center mb-3">
-                                        {!showClearConfirm ? (
-                                            <button onClick={() => setShowClearConfirm(true)} className="p-1 text-slate-200 hover:text-rose-500 transition-colors">
-                                                <Icon name="trash-2" size={16} />
-                                            </button>
-                                        ) : (
-                                            <div className="flex gap-2">
-                                                <button onClick={clearView} className="bg-rose-500 text-white text-[8px] px-2 py-0.5 rounded font-black">מחק</button>
-                                                <button onClick={() => setShowClearConfirm(false)} className="bg-slate-100 text-slate-400 text-[8px] px-2 py-0.5 rounded font-black">בטל</button>
-                                            </div>
-                                        )}
-                                        <h3 className="font-black text-slate-800 text-[10px] uppercase tracking-widest">פעולות אחרונות</h3>
-                                    </div>
-                                    <div className="space-y-2">
-                                        {stats.monthlyEntries.length === 0 ? (
-                                            <p className="text-center text-slate-300 text-[10px] py-4 italic">אין נתונים</p>
-                                        ) : (
-                                            stats.monthlyEntries.slice(0, 10).map(e => (
-                                                <div key={e.id} className="flex justify-between items-center p-2.5 bg-slate-50 rounded-xl border border-white">
-                                                    <div className="flex items-center gap-2">
-                                                        <div className={`w-2 h-2 rounded-full ${PAYMENT_METHODS.find(m => m.id === e.method)?.color || 'bg-slate-300'}`}></div>
-                                                        <div>
-                                                            <p className="text-sm font-black text-slate-800 leading-none">₪{Number(e.amount).toLocaleString()}</p>
-                                                            <p className="text-[8px] font-bold text-slate-400 uppercase mt-1">{String(e.date).split('-').reverse().join('/')}</p>
-                                                        </div>
-                                                    </div>
-                                                    <span className="text-[8px] font-black bg-white px-2 py-0.5 rounded-md border text-slate-400 uppercase tracking-tighter">{String(PAYMENT_METHODS.find(m => m.id === e.method)?.label || '')}</span>
-                                                </div>
-                                            ))
-                                        )}
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-                    </main>
-
-                    {/* Navbar - Fixed Bottom */}
-                    <nav className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-xl border-t p-3 pb-6 flex justify-around max-w-md mx-auto shadow-[0_-10px_30px_rgba(0,0,0,0.03)] rounded-t-[2rem] z-20">
-                        <button onClick={() => setView('input')} className={`flex flex-col items-center gap-1 transition-all ${view === 'input' ? 'text-blue-600 scale-105 font-black' : 'text-slate-300'}`}>
-                            <Icon name="plus-circle" size={24} strokeWidth={view === 'input' ? 3 : 2} />
-                            <p className="text-[9px] uppercase tracking-widest font-bold">הזנה</p>
-                        </button>
-                        
-                        <button onClick={() => setView('dashboard')} className={`flex flex-col items-center gap-1 transition-all ${view === 'dashboard' ? 'text-blue-600 scale-105 font-black' : 'text-slate-300'}`}>
-                            <Icon name="layout-dashboard" size={24} strokeWidth={view === 'dashboard' ? 3 : 2} />
-                            <p className="text-[9px] uppercase tracking-widest font-bold">ניתוח</p>
-                        </button>
-
-                        <a 
-                            href={settings.sheetUrl || '#'} 
-                            target={settings.sheetUrl ? "_blank" : "_self"} 
-                            rel="noopener noreferrer" 
-                            className={`flex flex-col items-center gap-1 transition-all ${settings.sheetUrl ? 'text-slate-400 hover:text-emerald-600' : 'text-slate-200'}`}
-                        >
-                            <Icon name="table" size={24} />
-                            <p className="text-[9px] uppercase tracking-widest font-bold">טבלה</p>
-                        </a>
-                    </nav>
+        {view === 'input' && (
+          <div className="space-y-4 animate-in fade-in duration-500">
+            {/* כרטיס הזנה מרכזי */}
+            <div className="bg-white p-6 rounded-[2.5rem] shadow-xl shadow-slate-200/40 border border-white border-opacity-50">
+              <form onSubmit={handleSaveEntry} className="space-y-6">
+                <div className="text-center space-y-1">
+                  <label className="text-[11px] font-black text-slate-300 uppercase tracking-widest leading-none">כמה נכנס?</label>
+                  <div className="relative">
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-3xl font-black text-slate-200">₪</span>
+                    <input 
+                      type="number" 
+                      inputMode="decimal" 
+                      value={amount} 
+                      onChange={e => setAmount(e.target.value)}
+                      placeholder="0" 
+                      className="w-full text-5xl font-black p-2 bg-transparent text-center outline-none placeholder-slate-100 text-slate-800" 
+                      required
+                    />
+                  </div>
                 </div>
-            );
-        }
 
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
-    </script>
-</body>
-</html>
+                <div className="grid grid-cols-2 gap-2.5">
+                  {PAYMENT_METHODS.map(m => (
+                    <button 
+                      key={m.id} 
+                      type="button" 
+                      onClick={() => setMethod(m.id)} 
+                      className={`p-3.5 rounded-[1.25rem] text-xs font-black transition-all ${
+                        method === m.id 
+                          ? 'bg-blue-600 text-white shadow-lg shadow-blue-200 scale-[1.03]' 
+                          : 'bg-slate-50 text-slate-400 hover:bg-slate-100'
+                      }`}
+                    >
+                      {String(m.label)}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="relative group">
+                  <input 
+                    type="date" 
+                    value={date} 
+                    onChange={e => setDate(e.target.value)} 
+                    className="w-full p-4 bg-slate-50 rounded-[1.25rem] text-right pr-12 font-bold text-slate-600 outline-none border-2 border-transparent focus:border-blue-100 transition-all" 
+                  />
+                  <Calendar size={20} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-blue-400 transition-colors" />
+                </div>
+
+                <button className="w-full bg-slate-900 text-white font-black py-5 rounded-[1.25rem] shadow-xl active:scale-95 transition-all flex justify-center items-center gap-3 text-base">
+                  <Save size={22} strokeWidth={2.5} /> 
+                  שמור בגיליון
+                </button>
+              </form>
+            </div>
+
+            {/* סיכומים מהירים */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="bg-emerald-50 p-5 rounded-[2rem] text-center border border-emerald-100 shadow-sm">
+                <p className="text-emerald-600 text-[10px] font-black uppercase tracking-wider mb-1">סה"כ החודש</p>
+                <p className="text-emerald-700 text-2xl font-black leading-none">₪{Number(stats.totalActual).toLocaleString()}</p>
+              </div>
+              <div className="bg-blue-50 p-5 rounded-[2rem] text-center border border-blue-100 shadow-sm">
+                <p className="text-blue-600 text-[10px] font-black uppercase tracking-wider mb-1">צפי סוף חודש</p>
+                <p className="text-blue-700 text-2xl font-black leading-none">₪{Math.round(Number(stats.projection)).toLocaleString()}</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {view === 'dashboard' && (
+          <div className="space-y-5 animate-in fade-in duration-500">
+            {/* כרטיס ביצוע יעד */}
+            <div className="bg-white p-7 rounded-[2.5rem] shadow-lg border border-slate-50">
+              <div className={`p-6 rounded-[2rem] mb-6 ${stats.diff >= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'} border border-opacity-50`}>
+                <p className="text-xs font-black uppercase tracking-widest opacity-60 mb-2">ביצוע מול יעד נוכחי</p>
+                <p className="text-4xl font-black leading-none">{stats.diff >= 0 ? '+' : ''}₪{Math.round(Math.abs(stats.diff)).toLocaleString()}</p>
+                <p className="text-[11px] font-bold mt-4 text-slate-500 uppercase tracking-tighter flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-slate-300"></span>
+                  יום עבודה {Number(stats.passedWorkdays)} מתוך {Number(stats.totalWorkdaysInMonth)}
+                </p>
+              </div>
+              <div className="space-y-3 px-1">
+                <div className="flex justify-between text-xs font-black text-slate-400 uppercase tracking-tighter">
+                  <span>יעד: ₪{Number(settings.target).toLocaleString()}</span>
+                  <span>{Math.round(Number(stats.percentage))}%</span>
+                </div>
+                <div className="h-3.5 bg-slate-100 rounded-full overflow-hidden shadow-inner p-0.5">
+                  <div 
+                    style={{ width: `${Math.min(stats.percentage, 100)}%` }} 
+                    className="h-full bg-blue-600 rounded-full transition-all duration-1000 shadow-lg"
+                  ></div>
+                </div>
+              </div>
+            </div>
+
+            {/* היסטוריית פעולות */}
+            <div className="bg-white p-6 rounded-[2.5rem] shadow-lg border border-slate-50">
+              <div className="flex justify-between items-center mb-6">
+                {!showClearConfirm ? (
+                  <button onClick={() => setShowClearConfirm(true)} className="p-2.5 text-slate-200 hover:text-rose-500 transition-colors bg-slate-50 rounded-xl">
+                    <Trash2 size={20} />
+                  </button>
+                ) : (
+                  <div className="flex gap-2 animate-in slide-in-from-left duration-200">
+                    <button onClick={() => { setEntries([]); setShowClearConfirm(false); }} className="bg-rose-500 text-white text-xs px-4 py-2 rounded-xl font-bold shadow-md">מחק הכל</button>
+                    <button onClick={() => setShowClearConfirm(false)} className="bg-slate-100 text-slate-400 text-xs px-4 py-2 rounded-xl font-bold">בטל</button>
+                  </div>
+                )}
+                <h3 className="font-black text-slate-800 text-sm uppercase tracking-widest leading-none">פעולות אחרונות</h3>
+              </div>
+              <div className="space-y-3">
+                {stats.monthlyEntries.length === 0 ? (
+                  <p className="text-center text-slate-300 text-xs py-12 italic border-2 border-dashed border-slate-50 rounded-[2rem]">אין נתונים להצגה מהגיליון</p>
+                ) : (
+                  stats.monthlyEntries.slice(0, 10).map(e => (
+                    <div key={e.id} className="flex justify-between items-center p-4 bg-slate-50 rounded-2xl border border-white hover:bg-white hover:border-slate-200 transition-all hover:shadow-md group">
+                      <div className="flex items-center gap-3">
+                        <div className={`w-3 h-3 rounded-full shadow-sm ${PAYMENT_METHODS.find(m => m.id === e.method)?.color || 'bg-slate-300'}`}></div>
+                        <div>
+                          <p className="text-base font-black text-slate-800 leading-tight">₪{Number(e.amount).toLocaleString()}</p>
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter mt-0.5">{String(e.date).split('-').reverse().join('/')}</p>
+                        </div>
+                      </div>
+                      <span className="text-[10px] font-black bg-white px-3 py-1.5 rounded-xl border text-slate-500 shadow-sm uppercase tracking-tighter opacity-80 group-hover:opacity-100 transition-opacity">
+                        {String(PAYMENT_METHODS.find(m => m.id === e.method)?.label || 'לא ידוע')}
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </main>
+
+      {/* תפריט ניווט תחתון - יוקרתי ומעוגל */}
+      <nav className="fixed bottom-0 left-0 right-0 bg-white/80 backdrop-blur-2xl border-t border-slate-100 p-4 pb-10 flex justify-around max-w-md mx-auto shadow-[0_-20px_50px_rgba(0,0,0,0.04)] rounded-t-[2.5rem] z-30">
+        <button 
+          onClick={() => setView('input')} 
+          className={`flex flex-col items-center gap-1.5 transition-all duration-300 ${view === 'input' ? 'text-blue-600 scale-110' : 'text-slate-300 hover:text-slate-400'}`}
+        >
+          <div className={`p-1 rounded-xl ${view === 'input' ? 'bg-blue-50' : ''}`}>
+            <PlusCircle size={28} strokeWidth={view === 'input' ? 3 : 2} />
+          </div>
+          <span className="text-[10px] uppercase tracking-widest font-black">הזנה</span>
+        </button>
+        
+        <button 
+          onClick={() => setView('dashboard')} 
+          className={`flex flex-col items-center gap-1.5 transition-all duration-300 ${view === 'dashboard' ? 'text-blue-600 scale-110' : 'text-slate-300 hover:text-slate-400'}`}
+        >
+          <div className={`p-1 rounded-xl ${view === 'dashboard' ? 'bg-blue-50' : ''}`}>
+            <LayoutDashboard size={28} strokeWidth={view === 'dashboard' ? 3 : 2} />
+          </div>
+          <span className="text-[10px] uppercase tracking-widest font-black">ניתוח</span>
+        </button>
+
+        <a 
+          href={settings.sheetUrl || '#'} 
+          target={settings.sheetUrl ? "_blank" : "_self"} 
+          rel="noopener noreferrer" 
+          className={`flex flex-col items-center gap-1.5 transition-all ${settings.sheetUrl ? 'text-slate-400 hover:text-emerald-600' : 'text-slate-200'}`}
+          onClick={(e) => { if(!settings.sheetUrl) e.preventDefault(); }}
+        >
+          <div className="p-1">
+            <Table size={28} strokeWidth={2} />
+          </div>
+          <span className="text-[10px] uppercase tracking-widest font-black">טבלה</span>
+        </a>
+      </nav>
+    </div>
+  );
+}
