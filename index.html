@@ -1,16 +1,17 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { 
   PlusCircle, 
-  Database, 
-  RefreshCw, 
+  BarChart3, 
   Save, 
   Calendar, 
-  Trash2, 
-  LayoutDashboard, 
-  Table 
+  Table, 
+  RefreshCw, 
+  Trash2,
+  Database,
+  LayoutDashboard
 } from 'lucide-react';
 
-// --- Helpers ---
+// --- Constants & Helpers ---
 const PAYMENT_METHODS = [
   { id: 'paybox', label: 'פייבוקס', color: 'bg-blue-500' },
   { id: 'bit', label: 'ביט', color: 'bg-purple-500' },
@@ -25,14 +26,12 @@ const isWorkday = (year, month, day) => {
   return dayOfWeek !== 5 && dayOfWeek !== 6;
 };
 
+// --- Main App Component ---
 export default function App() {
   const [view, setView] = useState('input');
   const [entries, setEntries] = useState([]);
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [message, setMessage] = useState(null);
-  const [showClearConfirm, setShowClearConfirm] = useState(false);
-
-  // Settings state initialized from window.APP_CONFIG if available
+  
+  // אתחול הגדרות ללא ערכים קשיחים - שימוש ב-APP_CONFIG אם קיים
   const [settings, setSettings] = useState(() => {
     if (typeof window !== 'undefined' && window.APP_CONFIG) {
       return {
@@ -44,29 +43,21 @@ export default function App() {
     return { target: 0, scriptUrl: '', sheetUrl: '' };
   });
 
-  // Form state
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [message, setMessage] = useState(null);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+
+  // Form State
   const [amount, setAmount] = useState('');
   const [method, setMethod] = useState('bit');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
 
-  // Inject custom CSS for date picker and animations
-  useEffect(() => {
-    const style = document.createElement('style');
-    style.innerHTML = `
-      input[type="date"]::-webkit-calendar-picker-indicator {
-        background: transparent; bottom: 0; color: transparent; cursor: pointer;
-        height: auto; left: 0; position: absolute; right: 0; top: 0; width: auto;
-      }
-      @keyframes chart-draw { from { stroke-dasharray: 1000; stroke-dashoffset: 1000; } to { stroke-dashoffset: 0; } }
-      .animate-chart-draw { animation: chart-draw 2s ease-out forwards; }
-    `;
-    document.head.appendChild(style);
-    return () => document.head.removeChild(style);
-  }, []);
-
-  // Sync data from Google Sheets
+  // Load configuration and data
   const syncWithSheet = useCallback(async (url) => {
-    if (!url || !url.startsWith('http')) return;
+    if (!url || !url.startsWith('http')) {
+      setIsSyncing(false);
+      return;
+    }
     setIsSyncing(true);
     try {
       const response = await fetch(url);
@@ -83,24 +74,33 @@ export default function App() {
         localStorage.setItem('income_entries', JSON.stringify(formattedData));
       }
     } catch (err) {
-      console.error("Sync error:", err);
+      console.error("Sheet sync error:", err);
     } finally {
       setIsSyncing(false);
     }
   }, []);
 
-  // Sync on mount or when APP_CONFIG changes
   useEffect(() => {
+    // עדכון הגדרות במידה ונטענו באיחור
     if (typeof window !== 'undefined' && window.APP_CONFIG) {
-      setSettings(window.APP_CONFIG);
-      if (window.APP_CONFIG.scriptUrl) syncWithSheet(window.APP_CONFIG.scriptUrl);
+      const config = window.APP_CONFIG;
+      setSettings({
+        target: Number(config.target) || 0,
+        scriptUrl: config.scriptUrl || '',
+        sheetUrl: config.sheetUrl || ''
+      });
+      if (config.scriptUrl) {
+        syncWithSheet(config.scriptUrl);
+      }
     } else {
+      // Fallback לנתונים מקומיים אם אין קובץ קונפיג
       const savedEntries = localStorage.getItem('income_entries');
       if (savedEntries) setEntries(JSON.parse(savedEntries));
+      setIsSyncing(false);
     }
   }, [syncWithSheet]);
 
-  // Statistics Calculation
+  // Calculations
   const stats = useMemo(() => {
     const now = new Date();
     const currentMonth = now.getMonth();
@@ -136,8 +136,9 @@ export default function App() {
       diff, 
       percentage: safeTarget > 0 ? (totalActual / safeTarget) * 100 : 0, 
       passedWorkdays, 
-      totalWorkdaysInMonth,
-      monthlyEntries
+      totalWorkdaysInMonth, 
+      monthlyEntries,
+      daysInMonth
     };
   }, [entries, settings]);
 
@@ -145,18 +146,13 @@ export default function App() {
     e.preventDefault();
     if (!amount) return;
 
-    // Timezone safe timestamp (Asia/Jerusalem)
-    const now = new Date();
-    const timestampFormatted = now.toLocaleString('sv-SE', { timeZone: 'Asia/Jerusalem' }).replace('T', ' ');
-
     const newEntry = {
       amount: Number(amount),
       method: String(method),
       date: String(date),
-      timestamp: timestampFormatted
+      timestamp: new Date().toISOString()
     };
 
-    // Optimistic update
     const updated = [ { ...newEntry, id: Date.now() }, ...entries ];
     setEntries(updated);
 
@@ -165,9 +161,9 @@ export default function App() {
       try {
         await fetch(settings.scriptUrl, { method: 'POST', mode: 'no-cors', body: JSON.stringify(newEntry) });
         setTimeout(() => syncWithSheet(settings.scriptUrl), 1500);
-        setMessage({ text: 'נשמר בגיליון!' });
+        setMessage({ text: 'נשלח לגיליון!' });
       } catch (err) {
-        setMessage({ text: 'נשמר מקומית בלבד' });
+        setMessage({ text: 'נשמר רק מקומית' });
       }
     } else {
       localStorage.setItem('income_entries', JSON.stringify(updated));
@@ -179,36 +175,33 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col font-sans overflow-x-hidden" dir="rtl">
+    <div className="min-h-screen bg-slate-50 flex flex-col font-sans rtl overflow-x-hidden" dir="rtl">
       {/* Header */}
-      <header className="bg-white px-5 py-4 border-b sticky top-0 z-10 shadow-sm flex justify-between items-center max-w-md mx-auto w-full">
+      <header className="bg-white px-4 py-3 border-b sticky top-0 z-10 shadow-sm flex justify-between items-center max-w-md mx-auto w-full">
         <div className="flex items-center gap-2">
-          <Database size={18} className={settings.scriptUrl ? "text-emerald-500" : "text-slate-300"} />
-          <div>
-            <h1 className="text-xl font-black text-slate-800 tracking-tight leading-none">הכנסות פלוס</h1>
-            <p className="text-[10px] text-slate-400 font-bold uppercase mt-1">ניהול משותף</p>
-          </div>
+          <Database size={16} className={settings.scriptUrl ? "text-emerald-500" : "text-slate-300"} />
+          <h1 className="text-lg font-black text-slate-800 tracking-tight leading-none">הכנסות פלוס</h1>
         </div>
         <button 
           onClick={() => syncWithSheet(settings.scriptUrl)} 
-          className={`p-2 bg-slate-50 rounded-full text-slate-400 transition-all active:scale-90 ${isSyncing ? 'animate-spin text-blue-500' : ''}`}
+          className={`p-1.5 bg-slate-50 rounded-full text-slate-400 transition-all active:scale-90 ${isSyncing ? 'animate-spin text-blue-500' : ''}`}
         >
-          <RefreshCw size={20} />
+          <RefreshCw size={18} />
         </button>
       </header>
 
-      <main className="max-w-md mx-auto w-full p-4 space-y-4 flex-1 overflow-y-auto pb-28 text-right">
+      <main className="max-w-md mx-auto w-full p-3 space-y-3 text-right flex-1 overflow-y-auto pb-24">
         {message && (
-          <div className="bg-slate-900 text-white p-3 rounded-xl text-center font-bold text-sm shadow-lg animate-in slide-in-from-top duration-300">
+          <div className="bg-slate-900 text-white p-2 rounded-lg text-center font-bold text-xs shadow-lg animate-in slide-in-from-top duration-300">
             {String(message.text)}
           </div>
         )}
 
         {view === 'input' && (
-          <div className="space-y-4 animate-in fade-in duration-500">
-            {/* Input Section - Balanced Size */}
-            <div className="bg-white p-6 rounded-[2.5rem] shadow-xl shadow-slate-200/50 border border-white">
-              <form onSubmit={handleSaveEntry} className="space-y-6">
+          <div className="space-y-3 animate-in fade-in duration-500">
+            {/* Form Section */}
+            <div className="bg-white p-4 rounded-[2rem] shadow-xl shadow-slate-200/50 border border-white">
+              <form onSubmit={handleSaveEntry} className="space-y-4">
                 <div className="text-center space-y-1">
                   <label className="text-[10px] font-black text-slate-300 uppercase tracking-widest leading-none">כמה נכנס?</label>
                   <input 
@@ -217,7 +210,7 @@ export default function App() {
                     value={amount} 
                     onChange={e => setAmount(e.target.value)}
                     placeholder="₪0" 
-                    className="w-full text-5xl font-black p-2 bg-transparent text-center outline-none placeholder-slate-100 text-slate-800" 
+                    className="w-full text-5xl font-black p-1 bg-transparent text-center outline-none placeholder-slate-100 text-slate-800" 
                     required
                   />
                 </div>
@@ -228,7 +221,7 @@ export default function App() {
                       key={m.id} 
                       type="button" 
                       onClick={() => setMethod(m.id)} 
-                      className={`p-4 rounded-2xl text-xs font-black transition-all ${method === m.id ? 'bg-blue-600 text-white shadow-lg scale-105' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}
+                      className={`p-3 rounded-2xl text-[11px] font-black transition-all ${method === m.id ? 'bg-blue-600 text-white shadow-lg scale-105' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}
                     >
                       {String(m.label)}
                     </button>
@@ -240,25 +233,25 @@ export default function App() {
                     type="date" 
                     value={date} 
                     onChange={e => setDate(e.target.value)} 
-                    className="w-full p-4 bg-slate-50 rounded-2xl text-right pr-12 font-bold text-slate-600 outline-none border-2 border-transparent focus:border-blue-100 transition-all" 
+                    className="w-full p-3.5 bg-slate-50 rounded-2xl text-right pr-12 font-bold text-slate-600 outline-none border-2 border-transparent focus:border-blue-100 transition-all" 
                   />
-                  <Calendar size={20} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300" />
+                  <Calendar size={18} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300" />
                 </div>
 
-                <button className="w-full bg-slate-900 text-white font-black py-5 rounded-2xl shadow-xl active:scale-95 transition-all flex justify-center items-center gap-2 text-base">
-                  <Save size={22} /> שמור בגיליון
+                <button className="w-full bg-slate-900 text-white font-black py-4 rounded-2xl shadow-xl active:scale-95 transition-all flex justify-center items-center gap-2">
+                  <Save size={20} /> שמור וסנכרן
                 </button>
               </form>
             </div>
 
-            {/* Quick Stats Grid */}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="bg-emerald-50 p-5 rounded-[2rem] text-center border border-emerald-100 shadow-sm">
-                <p className="text-emerald-600 text-[10px] font-black uppercase tracking-wider mb-1">סה"כ החודש</p>
+            {/* Quick Cards Grid */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-emerald-50 p-4 rounded-3xl text-center border border-emerald-100">
+                <p className="text-emerald-600 text-[10px] font-black uppercase tracking-wider mb-0.5">סה"כ החודש</p>
                 <p className="text-emerald-700 text-2xl font-black leading-none">₪{Number(stats.totalActual).toLocaleString()}</p>
               </div>
-              <div className="bg-blue-50 p-5 rounded-[2rem] text-center border border-blue-100 shadow-sm">
-                <p className="text-blue-600 text-[10px] font-black uppercase tracking-wider mb-1">צפי סוף חודש</p>
+              <div className="bg-blue-50 p-4 rounded-3xl text-center border border-blue-100">
+                <p className="text-blue-600 text-[10px] font-black uppercase tracking-wider mb-0.5">צפי לסוף חודש</p>
                 <p className="text-blue-700 text-2xl font-black leading-none">₪{Math.round(Number(stats.projection)).toLocaleString()}</p>
               </div>
             </div>
@@ -266,20 +259,20 @@ export default function App() {
         )}
 
         {view === 'dashboard' && (
-          <div className="space-y-5 animate-in fade-in duration-500">
+          <div className="space-y-4 animate-in fade-in duration-500">
             {/* Progress Card */}
-            <div className="bg-white p-6 rounded-[2.5rem] shadow-lg border border-slate-50">
-              <div className={`p-6 rounded-3xl mb-6 ${stats.diff >= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'} border`}>
-                <p className="text-xs font-black uppercase tracking-widest opacity-60 mb-1">ביצוע מול יעד נוכחי</p>
-                <p className="text-4xl font-black leading-none">{stats.diff >= 0 ? '+' : ''}₪{Math.round(Math.abs(stats.diff)).toLocaleString()}</p>
-                <p className="text-[10px] font-bold mt-4 text-slate-500 uppercase tracking-tighter">יום עבודה {Number(stats.passedWorkdays)} מתוך {Number(stats.totalWorkdaysInMonth)}</p>
+            <div className="bg-white p-6 rounded-[2rem] shadow-lg border border-slate-50">
+              <div className={`p-5 rounded-2xl mb-6 ${stats.diff >= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'} border`}>
+                <p className="text-[10px] font-black uppercase tracking-widest opacity-60">ביצוע מול יעד נוכחי</p>
+                <p className="text-4xl font-black mt-1 leading-none">{stats.diff >= 0 ? '+' : ''}₪{Math.round(Math.abs(stats.diff)).toLocaleString()}</p>
+                <p className="text-[10px] font-bold mt-3 text-slate-500 uppercase tracking-tighter">יום עבודה {Number(stats.passedWorkdays)} מתוך {Number(stats.totalWorkdaysInMonth)}</p>
               </div>
-              <div className="space-y-3 px-1">
-                <div className="flex justify-between text-xs font-black text-slate-400 uppercase tracking-tighter">
+              <div className="space-y-2 px-1">
+                <div className="flex justify-between text-[10px] font-black text-slate-400 uppercase tracking-tighter">
                   <span>יעד: ₪{Number(settings.target).toLocaleString()}</span>
                   <span>{Math.round(Number(stats.percentage))}%</span>
                 </div>
-                <div className="h-3 bg-slate-100 rounded-full overflow-hidden shadow-inner">
+                <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden shadow-inner">
                   <div style={{width: `${Math.min(stats.percentage, 100)}%`}} className="h-full bg-blue-500 transition-all duration-1000"></div>
                 </div>
               </div>
@@ -287,22 +280,22 @@ export default function App() {
 
             {/* History Card */}
             <div className="bg-white p-6 rounded-[2.5rem] shadow-lg border border-slate-50">
-              <div className="flex justify-between items-center mb-5">
+              <div className="flex justify-between items-center mb-4 text-right">
                 {!showClearConfirm ? (
                   <button onClick={() => setShowClearConfirm(true)} className="p-2 text-slate-200 hover:text-rose-500 transition-colors">
-                    <Trash2 size={20} />
+                    <Trash2 size={18} />
                   </button>
                 ) : (
-                  <div className="flex gap-2 animate-in slide-in-from-left duration-200">
-                    <button onClick={() => { setEntries([]); setShowClearConfirm(false); }} className="bg-rose-500 text-white text-xs px-3 py-1.5 rounded-xl font-bold">מחק</button>
-                    <button onClick={() => setShowClearConfirm(false)} className="bg-slate-100 text-slate-400 text-xs px-3 py-1.5 rounded-xl font-bold">בטל</button>
+                  <div className="flex gap-2">
+                    <button onClick={() => { setEntries([]); setShowClearConfirm(false); }} className="bg-rose-500 text-white text-[10px] px-2 py-1 rounded-lg font-bold">מחק</button>
+                    <button onClick={() => setShowClearConfirm(false)} className="bg-slate-100 text-slate-400 text-[10px] px-2 py-1 rounded-lg font-bold">בטל</button>
                   </div>
                 )}
-                <h3 className="font-black text-slate-800 text-sm uppercase tracking-widest">פעולות אחרונות</h3>
+                <h3 className="font-black text-slate-800 text-xs uppercase tracking-widest">פעולות אחרונות</h3>
               </div>
               <div className="space-y-3">
                 {stats.monthlyEntries.length === 0 ? (
-                  <p className="text-center text-slate-300 text-xs py-10 italic border-2 border-dashed border-slate-50 rounded-3xl">אין נתונים להצגה</p>
+                  <p className="text-center text-slate-300 text-xs py-8 italic border-2 border-dashed border-slate-50 rounded-xl">אין נתונים להצגה</p>
                 ) : (
                   stats.monthlyEntries.slice(0, 10).map(e => (
                     <div key={e.id} className="flex justify-between items-center p-4 bg-slate-50 rounded-2xl border border-white hover:bg-white hover:border-slate-100 transition-all shadow-sm">
@@ -313,9 +306,7 @@ export default function App() {
                           <p className="text-[10px] font-bold text-slate-400 uppercase">{String(e.date).split('-').reverse().join('/')}</p>
                         </div>
                       </div>
-                      <span className="text-[10px] font-black bg-white px-3 py-1 rounded-full border text-slate-500 shadow-sm uppercase tracking-tighter">
-                        {String(PAYMENT_METHODS.find(m => m.id === e.method)?.label || '')}
-                      </span>
+                      <span className="text-[9px] font-black bg-white px-3 py-1 rounded-full border text-slate-500 shadow-sm">{String(PAYMENT_METHODS.find(m => m.id === e.method)?.label || '')}</span>
                     </div>
                   ))
                 )}
@@ -326,12 +317,12 @@ export default function App() {
       </main>
 
       {/* Navigation Footer */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-xl border-t p-4 pb-10 flex justify-around max-w-md mx-auto shadow-2xl rounded-t-[2.5rem] z-20">
+      <nav className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-xl border-t p-4 pb-8 flex justify-around max-w-md mx-auto shadow-2xl rounded-t-[2.5rem] z-20">
         <button 
           onClick={() => setView('input')} 
           className={`flex flex-col items-center gap-1.5 transition-all ${view === 'input' ? 'text-blue-600 scale-110 font-black' : 'text-slate-300 hover:text-slate-400'}`}
         >
-          <PlusCircle size={28} strokeWidth={view === 'input' ? 3 : 2} />
+          <PlusCircle size={26} strokeWidth={view === 'input' ? 3 : 2} />
           <span className="text-[10px] uppercase tracking-tighter font-bold">הזנה</span>
         </button>
         
@@ -339,7 +330,7 @@ export default function App() {
           onClick={() => setView('dashboard')} 
           className={`flex flex-col items-center gap-1.5 transition-all ${view === 'dashboard' ? 'text-blue-600 scale-110 font-black' : 'text-slate-300 hover:text-slate-400'}`}
         >
-          <LayoutDashboard size={28} strokeWidth={view === 'dashboard' ? 3 : 2} />
+          <LayoutDashboard size={26} strokeWidth={view === 'dashboard' ? 3 : 2} />
           <span className="text-[10px] uppercase tracking-tighter font-bold">ניתוח</span>
         </button>
 
@@ -347,10 +338,10 @@ export default function App() {
           href={settings.sheetUrl || '#'} 
           target={settings.sheetUrl ? "_blank" : "_self"} 
           rel="noopener noreferrer" 
-          className={`flex flex-col items-center gap-1.5 transition-all ${settings.sheetUrl ? 'text-slate-400 hover:text-emerald-600' : 'text-slate-300'}`}
+          className={`flex flex-col items-center gap-1.5 transition-all ${settings.sheetUrl ? 'text-slate-400 hover:text-emerald-600' : 'text-slate-200'}`}
           onClick={(e) => { if(!settings.sheetUrl) e.preventDefault(); }}
         >
-          <Table size={28} strokeWidth={2} />
+          <Table size={26} strokeWidth={2} />
           <span className="text-[10px] uppercase tracking-tighter font-bold">טבלה</span>
         </a>
       </nav>
