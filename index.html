@@ -6,10 +6,7 @@ import {
   setDoc, 
   onSnapshot, 
   collection, 
-  query, 
   addDoc, 
-  deleteDoc,
-  getDoc
 } from 'firebase/firestore';
 import { 
   getAuth, 
@@ -24,20 +21,16 @@ import {
   Save, 
   TrendingUp, 
   Calendar, 
-  Wallet, 
   History, 
-  AlertCircle, 
   Loader2, 
   TrendingDown, 
-  Info, 
   Users, 
   Cloud,
-  ExternalLink,
   Table
 } from 'lucide-react';
 
 // --- Firebase Configuration ---
-const firebaseConfig = JSON.parse(__firebase_config);
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
@@ -70,7 +63,7 @@ export default function App() {
   const [method, setMethod] = useState('bit');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
 
-  // (1) Authentication Hook - Mandatory Rule 3
+  // (1) Authentication Hook
   useEffect(() => {
     const initAuth = async () => {
       try {
@@ -90,11 +83,11 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // (2) Firestore Listeners - Mandatory Rule 1 & 2
+  // (2) Firestore Listeners
   useEffect(() => {
     if (!user) return;
 
-    // Fixed path for settings - must be 6 segments for doc()
+    // Fixed path for settings document (Must have 6 segments)
     const settingsRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'config');
     const unsubSettings = onSnapshot(settingsRef, (snapshot) => {
       if (snapshot.exists()) {
@@ -107,7 +100,7 @@ export default function App() {
       }
     }, (err) => console.error("Settings fetch error", err));
 
-    // Listen to Income Entries - 5 segments for collection()
+    // Listen to Income Entries (5 segments for collection)
     const entriesRef = collection(db, 'artifacts', appId, 'public', 'data', 'entries');
     const unsubEntries = onSnapshot(entriesRef, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ 
@@ -116,7 +109,7 @@ export default function App() {
         amount: Number(doc.data().amount || 0),
         date: String(doc.data().date || '')
       }));
-      // Sorting in memory - Mandatory Rule 2
+      // Sort in memory
       setEntries(data.sort((a, b) => new Date(b.date) - new Date(a.date)));
     }, (err) => console.error("Entries fetch error", err));
 
@@ -155,26 +148,14 @@ export default function App() {
     const projection = passedWorkdays > 0 ? (totalActual / passedWorkdays) * totalWorkdaysInMonth : 0;
     const diff = totalActual - targetToDate;
 
-    // Chart Data
-    const dailyData = [];
-    let cumulativeActual = 0;
-    let cumulativeTarget = 0;
-    for (let d = 1; d <= daysInMonth; d++) {
-      const dayEntries = monthlyEntries.filter(e => new Date(e.date).getDate() === d);
-      cumulativeActual += dayEntries.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
-      if (isWorkday(currentYear, currentMonth, d)) cumulativeTarget += targetPerWorkday;
-      dailyData.push({ day: d, actual: d <= dayOfMonth ? cumulativeActual : null, target: cumulativeTarget });
-    }
-
     return { 
       totalActual, 
       targetToDate, 
       projection, 
       diff, 
-      percentage: (totalActual / safeTarget) * 100 || 0, 
+      percentage: safeTarget > 0 ? (totalActual / safeTarget) * 100 : 0, 
       passedWorkdays, 
       totalWorkdaysInMonth, 
-      dailyData, 
       daysInMonth, 
       dayOfMonth,
       targetPerWorkday,
@@ -197,10 +178,10 @@ export default function App() {
     setLoading(true);
 
     try {
-      // 1. Save to Firestore (Cloud) - Mandatory Rule 1
+      // Save to Firestore
       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'entries'), newEntry);
 
-      // 2. Sync to Google Sheets (External)
+      // Sync to Google Sheets
       if (settings.scriptUrl && settings.scriptUrl.startsWith('http')) {
         try {
           await fetch(settings.scriptUrl, { 
@@ -209,14 +190,14 @@ export default function App() {
             body: JSON.stringify(newEntry) 
           });
         } catch (sheetErr) {
-          console.warn("Google Sheets sync failed, but data saved to cloud", sheetErr);
+          console.warn("Sheet sync error", sheetErr);
         }
       }
 
       setAmount('');
-      setMessage({ type: 'success', text: 'נשמר בענן וסונכרן!' });
+      setMessage({ type: 'success', text: 'נשמר בהצלחה!' });
     } catch (err) {
-      console.error("Firestore add error", err);
+      console.error(err);
       setMessage({ type: 'error', text: 'שגיאה בשמירה לענן' });
     } finally {
       setLoading(false);
@@ -227,12 +208,11 @@ export default function App() {
   const updateSettings = async (newSettings) => {
     if (!user) return;
     try {
-      // Fixed path - doc references must have 6 segments
       await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'config'), newSettings, { merge: true });
-      setMessage({ type: 'success', text: 'ההגדרות עודכנו לכולם!' });
+      setMessage({ type: 'success', text: 'ההגדרות עודכנו!' });
       setTimeout(() => setMessage(null), 2000);
     } catch (err) {
-      console.error("Update settings error", err);
+      console.error(err);
     }
   };
 
@@ -240,13 +220,13 @@ export default function App() {
     <div className="h-screen flex items-center justify-center bg-slate-50">
       <div className="text-center space-y-4">
         <Loader2 className="animate-spin text-blue-500 mx-auto" size={40} />
-        <p className="text-slate-500 font-bold">מתחבר לענן...</p>
+        <p className="text-slate-500 font-bold">מתחבר למערכת...</p>
       </div>
     </div>
   );
 
   return (
-    <div className="min-h-screen bg-slate-50 font-sans text-slate-900 pb-24 rtl" dir="rtl">
+    <div className="min-h-screen bg-slate-50 font-sans text-slate-900 pb-24 rtl overflow-x-hidden" dir="rtl">
       {/* Header */}
       <header className="bg-white px-6 pt-8 pb-4 border-b border-slate-100 sticky top-0 z-10 shadow-sm flex justify-between items-center max-w-md mx-auto">
         <div className="flex items-center gap-3">
@@ -256,7 +236,7 @@ export default function App() {
           <div>
             <h1 className="text-xl font-black text-slate-900 tracking-tight">הכנסות פלוס</h1>
             <div className="flex items-center gap-1 text-[10px] text-emerald-600 font-bold uppercase">
-              <Cloud size={10} /> סנכרון ענן פעיל
+              <Cloud size={10} /> ענן פעיל
             </div>
           </div>
         </div>
@@ -349,7 +329,7 @@ export default function App() {
              <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 text-center space-y-4">
                 <div className={`p-5 rounded-2xl flex justify-between items-center ${stats.diff >= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'} border`}>
                   <div className="text-right">
-                    <p className="text-[10px] font-bold uppercase mb-1">מצב נוכחי מול יעד</p>
+                    <p className="text-[10px] font-bold uppercase mb-1">ביצוע מול יעד נוכחי</p>
                     <p className="text-3xl font-black leading-none">{stats.diff >= 0 ? '+' : ''}₪{Math.round(Math.abs(stats.diff)).toLocaleString()}</p>
                   </div>
                   <div className="text-left">
@@ -360,7 +340,7 @@ export default function App() {
                 <div className="space-y-2">
                    <div className="flex justify-between text-xs font-bold text-slate-400">
                       <span>התקדמות יעד חודשי</span>
-                      <span>{Math.round(stats.percentage)}%</span>
+                      <span>{Math.round(Number(stats.percentage))}%</span>
                    </div>
                    <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
                       <div style={{width: `${Math.min(stats.percentage, 100)}%`}} className="h-full bg-blue-500 transition-all duration-1000"></div>
@@ -384,7 +364,7 @@ export default function App() {
         {view === 'settings' && (
           <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-100 space-y-8 animate-in slide-in-from-right-4 duration-500 text-right">
             <div>
-              <label className="block text-sm font-bold text-slate-500 mb-3">יעד הכנסה חודשי משותף</label>
+              <label className="block text-sm font-bold text-slate-500 mb-3">יעד הכנסה חודשי</label>
               <input 
                 type="number" 
                 value={settings.target} 
@@ -397,7 +377,7 @@ export default function App() {
             </div>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-bold text-emerald-600 mb-3">Google Sheets Script URL (לסנכרון)</label>
+                <label className="block text-sm font-bold text-emerald-600 mb-3 text-xs uppercase tracking-tight">Google Sheets Script URL (סנכרון)</label>
                 <input 
                   type="text" value={String(settings.scriptUrl)} 
                   onChange={e => updateSettings({ ...settings, scriptUrl: String(e.target.value) })}
@@ -406,26 +386,19 @@ export default function App() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-bold text-blue-600 mb-3">Google Sheet URL (לצפייה בטבלה)</label>
+                <label className="block text-sm font-bold text-blue-600 mb-3 text-xs uppercase tracking-tight">Google Sheet URL (צפייה בטבלה)</label>
                 <input 
                   type="text" value={String(settings.sheetUrl)} 
                   onChange={e => updateSettings({ ...settings, sheetUrl: String(e.target.value) })}
                   className="w-full p-4 bg-slate-50 rounded-xl text-[10px] border border-slate-200 outline-none dir-ltr" 
                   placeholder="https://docs.google.com/spreadsheets/..." 
                 />
-                <p className="text-[9px] text-slate-400 mt-1">הכנס את הכתובת של הגיליון עצמו כדי לפתוח אותו מהתפריט המהיר.</p>
               </div>
             </div>
             <div className="text-center p-4 bg-slate-50 rounded-2xl border border-dashed border-slate-200 overflow-hidden">
-               <p className="text-[10px] text-slate-400 font-bold mb-2 uppercase">מזהה משתמש בענן</p>
-               <p className="text-[8px] font-mono text-slate-300 break-all uppercase tracking-tighter">{String(user.uid)}</p>
+               <p className="text-[10px] text-slate-400 font-bold mb-2 uppercase">מזהה משתמש</p>
+               <p className="text-[8px] font-mono text-slate-300 break-all">{String(user.uid)}</p>
             </div>
-            <button 
-              onClick={() => { if(window.confirm('לאפס נתונים מקומיים? (המידע בענן יישמר)')) location.reload(); }}
-              className="w-full text-rose-500 text-[10px] font-black py-4 border border-rose-100 rounded-2xl uppercase tracking-widest shadow-sm transition-all hover:bg-rose-50"
-            >
-              רענון נתונים מהענן
-            </button>
           </div>
         )}
       </main>
