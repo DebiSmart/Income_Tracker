@@ -146,11 +146,18 @@ export default function App() {
     e.preventDefault();
     if (!amount) return;
 
+    // פתרון דינמי לשעון קיץ/חורף בישראל:
+    // שימוש ב-locale שוודי (sv-SE) שמייצר פורמט YYYY-MM-DD HH:mm:ss באופן טבעי
+    const now = new Date();
+    const timestampFormatted = now.toLocaleString('sv-SE', { 
+      timeZone: 'Asia/Jerusalem' 
+    }).replace('T', ' ');
+
     const newEntry = {
       amount: Number(amount),
       method: String(method),
       date: String(date),
-      timestamp: new Date().toISOString()
+      timestamp: timestampFormatted
     };
 
     const updated = [ { ...newEntry, id: Date.now() }, ...entries ];
